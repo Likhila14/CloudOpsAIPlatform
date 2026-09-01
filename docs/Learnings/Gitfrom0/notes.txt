@@ -1,0 +1,5 @@
+1. what is git..
+2. what is staging repo..
+3. how git identifies the changes is it checksum ?
+4. does git need internet to do these all things ?
+5. explain everything step by step how git works.. its like everything happening in front of me.. I am seeing how git is working.. every small details I want to know..
