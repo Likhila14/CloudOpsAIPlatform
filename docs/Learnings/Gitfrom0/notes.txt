@@ -3,3 +3,11 @@
 3. how git identifies the changes is it checksum ?
 4. does git need internet to do these all things ?
 5. explain everything step by step how git works.. its like everything happening in front of me.. I am seeing how git is working.. every small details I want to know..
+6. explain all these flow 
+git init
+git add README.md
+git commit -m "first commit"
+git branch -M main
+git remote add origin https://github.com/Likhila14/CloudOpsAIPlatform.git
+git push -u origin main
+git log
