@@ -1,13 +1,945 @@
-1. what is git..
-2. what is staging repo..
-3. how git identifies the changes is it checksum ?
-4. does git need internet to do these all things ?
-5. explain everything step by step how git works.. its like everything happening in front of me.. I am seeing how git is working.. every small details I want to know..
-6. explain all these flow 
-git init
-git add README.md
-git commit -m "first commit"
-git branch -M main
-git remote add origin https://github.com/Likhila14/CloudOpsAIPlatform.git
-git push -u origin main
-git log
+You will understand Git from first principles after this. I will go **object store → commands → SSH → tags → branches/PRs → daily professional workflow**, in that order. Every later section depends on the earlier ones.
+
+---
+
+# 1. What is Git?
+
+**Git is a distributed version control system.** It records the history of your project as a timeline of snapshots, so you can:
+
+- go back in time
+- work on parallel ideas
+- merge work from multiple people
+- recover from mistakes
+- prove *who changed what, when, and why*
+
+Git is **not** GitHub. Git is the engine on your machine. GitHub/GitLab/Bitbucket are websites that store a copy of your Git history so teams can share it.
+
+A useful mental model:
+
+```
+Your laptop                    GitHub
+-----------                    ------
+.git  (full history)   <-->    origin (another full copy)
+working files                  (plus PRs, issues, CI)
+```
+
+Every clone is a **complete** repository: all commits, all branches, all history. That is why Git is called *distributed*. SVN/old systems were centralized: only the server had history.
+
+---
+
+# 2. What is a repo? What is staging?
+
+A **repository (repo)** is a project folder that contains a hidden `.git` directory. That folder is the entire database.
+
+When you `git init` or `git clone`, you get **three areas**, always:
+
+```
+┌─────────────────────┐
+│  WORKING TREE       │  files you edit (README.md, src/, etc.)
+│  (your actual files)│
+└──────────┬──────────┘
+           │ git add
+           ▼
+┌─────────────────────┐
+│  STAGING AREA       │  also called INDEX
+│  (.git/index)       │  "this is what the next commit will contain"
+└──────────┬──────────┘
+           │ git commit
+           ▼
+┌─────────────────────┐
+│  REPOSITORY         │  .git/objects  (permanent snapshots)
+│  (commit history)   │
+└─────────────────────┘
+```
+
+**Working tree** = the files you see in Explorer / VS Code.
+
+**Staging area (index)** = a prepared snapshot. It is *not* a commit yet. It is a shopping cart: you pick exactly which files (or even which hunks of a file) go into the next commit.
+
+**Repository** = the committed history. Once committed, Git stores it as objects. Commits are almost never deleted by normal commands.
+
+Why staging exists: you can edit 10 files, but commit only 2 of them, with a clean message. Professionals use staging to make **small, reviewable commits**.
+
+---
+
+# 3. How Git identifies changes — yes, checksums
+
+Git is a **content-addressable object database**. Every object is named by a **cryptographic hash** of its content.
+
+Historically that hash is **SHA-1** (40 hex characters). Newer Git can use **SHA-256**. GitHub still mostly uses SHA-1.
+
+Example blob hash:
+
+```
+e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
+```
+
+That is not a filename. It is the identity of **that exact content**.
+
+### What Git stores (4 object types)
+
+| Object | What it is |
+|--------|------------|
+| **blob** | raw file content (no filename) |
+| **tree** | a directory: names + modes + hashes of blobs/trees |
+| **commit** | a snapshot: pointer to a tree + parent commit(s) + author + date + message |
+| **tag** | a named pointer, optionally with a message and signature |
+
+### How change detection works
+
+1. You edit `README.md`.
+2. Git hashes the new file content.
+3. If the hash is **different** from the blob already recorded in the index/HEAD, Git knows it changed.
+4. Git does **not** primarily compare timestamps or “did the file size change?” as truth. Content hash is the identity.
+
+Git also uses:
+
+- **file metadata in the index** (size, mtime) as a *fast path* so it doesn’t re-hash every file on every `git status`
+- if metadata looks unchanged, it often skips hashing
+- if metadata changed, it re-hashes and compares to the stored blob
+
+So: **checksum is the source of truth. Timestamps are an optimization.**
+
+### Snapshot vs diff
+
+Git **records snapshots**, not “line 5 changed from A to B”.
+
+A commit says: “the project looked like **this tree** at this moment.”
+
+When you run `git diff` or `git log -p`, Git **computes** the difference between two snapshots. Internally, packfiles may later compress similar objects with deltas to save disk. That is packing, not the data model.
+
+### Why hashes matter
+
+- If even 1 byte changes, the hash changes.
+- You cannot secretly rewrite history without the hashes changing.
+- Two identical files in different folders share the **same blob**. Git stores the content once.
+
+---
+
+# 4. Does Git need internet?
+
+**No for almost everything. Yes only to talk to a remote.**
+
+| Needs internet? | Commands |
+|-----------------|----------|
+| **No** | `init`, `add`, `commit`, `status`, `diff`, `log`, `branch`, `checkout`, `switch`, `merge`, `rebase`, `stash`, `tag`, `rm`, `reset` |
+| **Yes** (or a network to the remote) | `clone`, `fetch`, `pull`, `push`, `ls-remote` |
+
+Your `.git` folder **is** the full history. You can fly on a plane, commit 50 times, then push when you have Wi‑Fi.
+
+`git remote add origin ...` does **not** need internet. It only **writes a URL** into `.git/config`. Internet is needed on `git push` / `git fetch`.
+
+---
+
+# 5. How Git actually works — as if you are watching it
+
+Imagine a brand new folder. Nothing exists yet.
+
+### Step 0 — files on disk
+
+```
+CloudOpsAIPlatform/
+  README.md
+```
+
+This is just a normal folder. Git does not know it exists.
+
+### Step 1 — `git init` creates the database
+
+Git creates `.git/` roughly like this:
+
+```
+.git/
+  HEAD                 → "I currently point at refs/heads/master" (or main)
+  config               → local settings
+  description
+  hooks/               → scripts (pre-commit, etc.), unused until you add them
+  info/
+  objects/             → the object database (empty at first)
+  refs/
+    heads/             → branch pointers (empty until first commit)
+    tags/
+  index                → created/updated on first `git add`
+```
+
+`HEAD` is a **tiny text file**. On a normal branch it contains:
+
+```
+ref: refs/heads/main
+```
+
+Meaning: “the current branch is `main`.” The branch itself is another tiny file that will later contain a commit hash.
+
+**No internet. No GitHub. Just a database on disk.**
+
+### Step 2 — you write `README.md`
+
+Git still has done nothing. `git status` would say: untracked file.
+
+**Untracked** means: Git sees the file in the working tree, but it is not in the index.
+
+### Step 3 — `git add README.md` (staging)
+
+This is the most misunderstood command. Watch what happens:
+
+1. Git reads `README.md` bytes.
+2. Git prepends a header like `blob <size>\0` then hashes that.
+3. Git stores the object as a **zlib-compressed** file:
+
+```
+.git/objects/ab/cdef1234...
+```
+
+The first 2 characters of the hash become a folder. The rest is the filename. That is just to avoid one giant folder.
+
+4. Git updates `.git/index`: “the next commit’s `README.md` should be blob `abcde...`”
+
+The **filename lives in the index/tree**, not in the blob. The blob is only content.
+
+After `git add`:
+
+- working tree: README.md
+- index: README.md → blob hash
+- repository: blob object exists, **but there is still no commit**
+
+If you delete README.md from disk now, Git can restore it from the blob, because the content is already in `.git/objects`.
+
+If you edit README.md **after** `git add`, you get:
+
+```
+Changes to be committed:     (old version in index)
+Changes not staged for commit: (new version in working tree)
+```
+
+Same file, two versions. That is staging doing its job.
+
+### Step 4 — `git commit` (freeze a snapshot)
+
+Git now:
+
+1. Takes the index and builds a **tree** object (the directory listing).
+2. Hashes that tree, stores it in `objects/`.
+3. Creates a **commit** object containing:
+
+```
+tree <tree-hash>
+parent <previous-commit-hash>     (omitted on first commit)
+author You <email> <timestamp>
+committer You <email> <timestamp>
+
+first commit
+```
+
+4. Hashes that commit object → `e.g. 9f3a1c...`
+5. Writes that hash into `.git/refs/heads/main`
+6. `HEAD` still says `ref: refs/heads/main`, so `HEAD` now *indirectly* points at that commit.
+
+Picture after first commit:
+
+```
+HEAD ──► main ──► commit 9f3a1c
+                      │
+                      ▼
+                    tree
+                      │
+                      ▼
+                    blob (README.md content)
+```
+
+A **commit is a pointer to a tree**, plus metadata, plus parent(s). History is a chain of commits:
+
+```
+A ← B ← C ← D  ← main
+```
+
+Each commit points to its **parent**. Newer commits point backward. Git history is a **directed acyclic graph (DAG)**.
+
+### Step 5 — how `git status` works (the “diff of three trees”)
+
+Git compares **three snapshots**:
+
+1. **HEAD** (last commit)
+2. **index** (staging)
+3. **working tree** (files on disk)
+
+| Comparison | Command | Meaning |
+|------------|---------|---------|
+| HEAD vs index | `git diff --cached` | what will go into the next commit |
+| index vs working tree | `git diff` | what you changed but haven’t staged |
+| HEAD vs working tree | `git diff HEAD` | everything since last commit |
+
+That is why you see those two sections in `git status`.
+
+### Step 6 — later commits
+
+Second commit:
+
+```
+A ← B  ← main
+```
+
+`B` stores `parent A`. The tree of `B` may reuse blob hashes from `A` for unchanged files. Git only stores **new blobs** for changed files.
+
+### Step 7 — remotes (still local until push)
+
+`git remote add origin URL` writes into `.git/config`:
+
+```
+[remote "origin"]
+    url = https://github.com/Likhila14/CloudOpsAIPlatform.git
+    fetch = +refs/heads/*:refs/remotes/origin/*
+```
+
+`origin` is just a **nickname**. It is not special except by convention.
+
+`refs/remotes/origin/main` is a **bookmark** saying: “last time I talked to GitHub, their `main` was commit XYZ.” It is not automatically live. It updates on `fetch`/`pull`/`push`.
+
+### Step 8 — `git push`
+
+Now Git needs the network.
+
+1. Your Git asks GitHub: what commit is your `main`?
+2. Git computes which objects GitHub is missing (objects reachable from your `main` that they don’t have).
+3. Git sends those objects (often packed).
+4. GitHub moves **their** `main` to your commit.
+5. Your Git updates `refs/remotes/origin/main`.
+6. With `-u`, Git sets **upstream tracking**: local `main` tracks `origin/main`.
+
+After that, `git push` / `git pull` with no extra args know where to go.
+
+---
+
+# 6. Your exact command flow, line by line
+
+This is the standard “put this project on GitHub” sequence.
+
+### `git init`
+
+Creates `.git/`. Current branch is usually `master` (older Git) or `main` (newer Git / GitHub default).
+
+You now have a repo. **Zero commits.** `HEAD` points at a branch that does not exist yet. That is called an **unborn branch**. The branch file is created at the first commit.
+
+### `git add README.md`
+
+- hashes README.md
+- writes blob to `.git/objects`
+- updates index
+
+Only that file is staged. Other files stay untracked.
+
+You can also:
+
+```bash
+git add .
+git add src/
+git add -p          # pick hunks interactively (professional habit)
+```
+
+### `git commit -m "first commit"`
+
+Creates tree + commit. Branch now exists. Message is stored **inside the commit object**, not as a separate file.
+
+Rules for messages (professional):
+
+- first line: short, imperative: `Add README`, `Fix login timeout`
+- optional blank line then body explaining **why**
+- `-m` is fine for small commits
+- `git commit` with no `-m` opens an editor for a proper message
+
+The commit records:
+
+- `user.name` and `user.email` from git config
+- timestamp
+- your commit message
+- the tree hash
+- parent(s)
+
+If name/email are wrong, Git still works, but GitHub may not link the commit to your account.
+
+### `git branch -M main`
+
+`-M` = rename (force). Renames the current branch to `main`.
+
+Why: GitHub’s default branch is `main`. If `git init` created `master`, this makes names match.
+
+This does **not** change any commits. It only renames the pointer file:
+
+```
+.git/refs/heads/master  →  .git/refs/heads/main
+```
+
+and updates `HEAD`.
+
+### `git remote add origin https://github.com/...`
+
+Saves the URL. Does **not** upload anything.
+
+HTTPS vs SSH:
+
+- **HTTPS**: `https://github.com/user/repo.git` — login via browser/credential manager or a personal access token
+- **SSH**: `git@github.com:user/repo.git` — uses `.ssh` keys (section 7)
+
+You can have multiple remotes (`origin`, `upstream`). For your own project, `origin` is enough.
+
+### `git push -u origin main`
+
+Uploads commits and creates `main` on GitHub if it doesn’t exist.
+
+- `origin` = which remote
+- `main` = which local branch to push
+- `-u` / `--set-upstream` = remember the link
+
+After this:
+
+```bash
+git push
+git pull
+```
+
+work on that branch with no extra arguments.
+
+**First push can fail if:**
+
+- GitHub repo already has a README/LICENSE commit you don’t have → you must `git pull --rebase origin main` (or merge) then push
+- you are not authenticated
+- you don’t have write permission
+
+### `git log`
+
+Reads the commit chain from `HEAD` backward.
+
+```
+commit 9f3a1c...
+Author: You
+Date: ...
+
+    first commit
+```
+
+Useful variants:
+
+```bash
+git log --oneline
+git log --oneline --graph --all --decorate
+git log -p                  # show diffs
+git log --author="Likhila"
+git log -- README.md        # history of one file
+git show HEAD               # one commit in detail
+```
+
+`--graph --all` is how you **see** branches splitting and merging.
+
+### `git commit -a`
+
+`-a` means: **stage all tracked, modified files, then commit**.
+
+It does **not** add new untracked files. Only files Git already knows.
+
+Equivalent to:
+
+```bash
+git add -u
+git commit
+```
+
+Professionals often **avoid** `-a` when they want a clean commit. They use `git add -p` instead. `-a` is fine when you intentionally want “all current tracked edits in one commit.”
+
+Note: `git commit -am "msg"` combines `-a` and `-m`.
+
+### `git rm --cached <filename>`
+
+This is **unstage + stop tracking**, but **keep the file on disk**.
+
+Normal `git rm file` = delete from disk **and** from the next commit.
+
+`--cached` = “Git, forget this file; leave my copy alone.”
+
+Typical use: you accidentally committed `.env` or `node_modules`.
+
+Correct sequence:
+
+1. Add the filename to `.gitignore`
+2. `git rm --cached .env`
+3. `git commit -m "Stop tracking .env"`
+
+The file remains on your machine. GitHub, after this commit, will **not** have it in **future** snapshots. **Old commits still contain it.** If it was a secret, you must rotate the secret. History rewrite (`git filter-repo`) is a separate, dangerous topic.
+
+`.gitignore` only affects **untracked** files. If a file is already tracked, ignore rules do nothing until you `git rm --cached`.
+
+---
+
+# 7. `.ssh` files and keys
+
+These are **not Git objects**. They are **login credentials** for SSH.
+
+When you use:
+
+```
+git@github.com:Likhila14/CloudOpsAIPlatform.git
+```
+
+Git does not send a password. OpenSSH uses a **key pair**.
+
+### Where they live (Windows)
+
+```
+C:\Users\hp\.ssh\
+  id_ed25519          private key  (NEVER share, NEVER commit)
+  id_ed25519.pub      public key    (this one goes to GitHub)
+  known_hosts         fingerprints of servers you have connected to
+  config              optional: host aliases, which key to use
+```
+
+Older keys: `id_rsa` / `id_rsa.pub`. Prefer **Ed25519**.
+
+### How a key pair works (simple)
+
+- **Private key** = your identity lock. Stays on your machine. Encrypted with a passphrase if you set one.
+- **Public key** = a padlock you give GitHub. GitHub stores it on your account.
+
+On `git push` via SSH:
+
+1. GitHub says: prove you own the private key that matches this public key.
+2. Your computer signs a challenge with the private key.
+3. GitHub verifies. You are authenticated as that GitHub user.
+
+That is why you paste **only** `.pub` into GitHub → Settings → SSH and GPG keys.
+
+### Typical setup
+
+```bash
+ssh-keygen -t ed25519 -C "you@email.com"
+# then start ssh-agent, add the key
+ssh-add ~/.ssh/id_ed25519
+ssh -T git@github.com
+```
+
+Success looks like: `Hi Likhila14! You've successfully authenticated...`
+
+### `known_hosts`
+
+First time you connect to github.com, SSH asks: “do you trust this server fingerprint?” If you say yes, it is saved in `known_hosts` so a fake GitHub server is harder to impersonate later.
+
+### HTTPS vs SSH for your flow
+
+Your command used **HTTPS**:
+
+```
+https://github.com/Likhila14/CloudOpsAIPlatform.git
+```
+
+That uses a **Personal Access Token** (password login is dead on GitHub), not SSH keys. Both work. SSH is nicer for daily push/pull once set up.
+
+**Never commit `.ssh` or private keys. Never paste a private key into chat.**
+
+---
+
+# 8. Git tags — `git tag`, `-a`, `-m`
+
+A **branch** moves. A **tag** is a sticky note on one commit: “this is v1.0.0.”
+
+### Lightweight tag
+
+```bash
+git tag v1.0.0
+```
+
+Just a file `.git/refs/tags/v1.0.0` containing a commit hash. No message. Fine for local bookmarks. Weak for releases.
+
+### Annotated tag (professional, what you meant by `-a -m`)
+
+```bash
+git tag -a v1.0.0 -m "Release 1.0.0"
+```
+
+- `-a` = annotated (creates a **tag object** in the object database)
+- `-m` = message
+
+The tag object stores: tagger name, date, message, pointer to the commit. You can GPG-sign it (`-s`) for verified releases.
+
+### Seeing and shipping tags
+
+```bash
+git tag                      # list
+git show v1.0.0
+git tag -a v1.0.1 -m "Bugfix release"
+git push origin v1.0.1       # tags do NOT push with normal git push
+git push origin --tags       # all tags
+git checkout v1.0.0          # detached HEAD at that release
+```
+
+**Tags are not pushed by default.** That surprises everyone. Releases on GitHub are usually annotated tags.
+
+SemVer is the professional convention: `v1.2.3` = major.minor.patch.
+
+---
+
+# 9. Branches, merge, pull requests — how they really work
+
+## A branch is not a copy of files
+
+A branch is a **43-byte text file** with a commit hash.
+
+```
+.git/refs/heads/main     → 9f3a1c...
+.git/refs/heads/feature  → a11b22...
+```
+
+Creating a branch is instant. It does not copy the project.
+
+```bash
+git branch feature-login          # create, stay on current branch
+git switch -c feature-login        # create AND move HEAD there
+# old style:
+git checkout -b feature-login
+```
+
+`HEAD` now says:
+
+```
+ref: refs/heads/feature-login
+```
+
+New commits move **that** pointer. `main` stays where it was.
+
+```
+          C ← feature-login
+         /
+A ← B ← D  ← main
+```
+
+You are not “on files.” You are **on a pointer**. Checking out a branch:
+
+1. reads the commit
+2. reads the tree
+3. writes those files into the working tree
+4. updates the index to match
+5. moves HEAD
+
+That is why switching branches with uncommitted work can fail: Git refuses to overwrite your uncommitted files.
+
+## Useful branch commands
+
+```bash
+git branch                 # local branches
+git branch -a              # local + remote-tracking
+git switch main
+git switch feature-login
+git branch -d feature-login   # delete if merged
+git branch -D feature-login   # force delete
+git branch -m old new         # rename
+```
+
+## Merge — combine histories
+
+You are on `main`. You want `feature-login` in:
+
+```bash
+git switch main
+git merge feature-login
+```
+
+### Fast-forward merge
+
+If `main` has not moved since you branched:
+
+```
+A ← B ← C ← D
+main      feature
+```
+
+Git just slides `main` to `D`. No extra commit. History stays a straight line.
+
+### Three-way merge (true merge)
+
+Both sides moved:
+
+```
+      C ← D  ← feature
+     /
+A ← B ← E ← F  ← main
+```
+
+Git finds the **merge base** (`B`), compares `B→F` and `B→D`, and creates a **merge commit** with **two parents**:
+
+```
+      C ← D
+     /      \
+A ← B ← E ← F ← M  ← main
+```
+
+`M` has parents `F` and `D`. That is the DAG.
+
+### Merge conflicts
+
+If both branches changed the **same lines** differently, Git cannot auto-merge.
+
+The file will contain markers:
+
+```
+<<<<<<< HEAD
+code from current branch (main)
+=======
+code from feature
+>>>>>>> feature-login
+```
+
+You edit, remove markers, then:
+
+```bash
+git add thefile
+git commit          # completes the merge
+```
+
+Abort:
+
+```bash
+git merge --abort
+```
+
+## Rebase (professional alternative)
+
+```bash
+git switch feature-login
+git rebase main
+```
+
+Replay your commits **on top of** latest `main`. History looks linear. Do **not** rebase commits already pushed to a shared branch unless the team agrees (`git push --force-with-lease`).
+
+Daily rule:
+
+- **your local unpushed branch**: rebase onto `main` is often clean
+- **shared `main`**: merge or PR merge, never rewrite public history casually
+
+## Pull requests — Git does not have PRs
+
+**Pull Request (GitHub) / Merge Request (GitLab)** is a website feature.
+
+The Git part:
+
+1. You push a branch: `git push -u origin feature-login`
+2. GitHub shows: “this branch is N commits ahead of main”
+3. You open a PR: “please merge `feature-login` into `main`”
+4. Reviewers comment, CI runs tests
+5. Someone clicks Merge (merge commit / squash / rebase)
+6. GitHub creates the merge on the **server**
+7. You `git switch main` && `git pull` to get it locally
+
+A PR is: **a branch + a discussion + a requested merge**.
+
+### Three GitHub merge styles
+
+| Button | What it does |
+|--------|----------------|
+| **Merge commit** | real merge commit, keeps all commits |
+| **Squash and merge** | all PR commits become **one** commit on main |
+| **Rebase and merge** | replays PR commits on main, linear history |
+
+Teams pick one policy. Follow the repo.
+
+## `fetch` vs `pull`
+
+```bash
+git fetch origin          # download new objects + update origin/* bookmarks
+git merge origin/main    # integrate (if you are on main)
+```
+
+`git pull` = `git fetch` + `git merge` (or rebase if configured).
+
+`fetch` is safer: you look first (`git log HEAD..origin/main`), then merge.
+
+---
+
+# Professional command map (actual IT work)
+
+## Every day
+
+```bash
+git status
+git diff
+git diff --staged
+git add -p
+git commit
+git fetch
+git status
+git pull
+git push
+git log --oneline --graph --decorate -15
+```
+
+## Start work
+
+```bash
+git switch main
+git pull
+git switch -c feature/JIRA-123-short-name
+# ... work ...
+git add -p
+git commit -m "Add health check endpoint"
+git push -u origin feature-login
+# open PR on GitHub
+```
+
+## Update your branch with latest main
+
+```bash
+git fetch origin
+git rebase origin/main
+# or: git merge origin/main
+git push --force-with-lease    # only if you rebased a branch you already pushed
+```
+
+`--force-with-lease` is safer than `--force`: it refuses if someone else pushed to your branch.
+
+## Undo (the ones you should actually know)
+
+| Situation | Command | Danger |
+|-----------|---------|--------|
+| Unstage a file | `git restore --staged file` | safe |
+| Discard working tree changes to a file | `git restore file` | **destroys uncommitted work** |
+| Undo last commit, keep changes staged | `git reset --soft HEAD~1` | ok if not pushed |
+| Undo last commit, keep changes unstaged | `git reset HEAD~1` | ok if not pushed |
+| Throw away last commit entirely | `git reset --hard HEAD~1` | **destroys commits + files** |
+| Make a new commit that reverses an old one | `git revert <hash>` | **safe on shared main** |
+| Temporarily shelf work | `git stash -u` then `git stash pop` | medium |
+
+**Rule:** if it is already on `origin/main`, **revert**, don’t `reset --hard`.
+
+## Inspect
+
+```bash
+git blame file.py
+git show <hash>
+git stash list
+git remote -v
+git config --list --show-origin
+git rev-parse HEAD
+git cat-file -p HEAD        # see the raw commit object
+```
+
+`git cat-file -p HEAD` is you **looking inside Git**. Try it once.
+
+## `.gitignore` (project hygiene)
+
+```
+.env
+node_modules/
+dist/
+*.log
+.venv/
+```
+
+Then untrack mistakes with `git rm --cached`.
+
+## Config you should set once (per machine)
+
+```bash
+git config --global user.name "Your Name"
+git config --global user.email "github-email@example.com"
+git config --global init.defaultBranch main
+git config --global core.autocrlf true    # Windows
+```
+
+`--global` = your user. Repo `.git/config` overrides it.
+
+## Detached HEAD (when people panic)
+
+If you `git checkout v1.0.0` or checkout a raw hash, `HEAD` points **directly at a commit**, not a branch. New commits would be orphaned.
+
+Fix: `git switch main` or `git switch -c recovery-branch`.
+
+## Stash
+
+```bash
+git stash -u
+git switch main
+# do something
+git switch -
+git stash pop
+```
+
+Use when you must change branches but are not ready to commit.
+
+## Cherry-pick
+
+Copy **one commit** onto your current branch:
+
+```bash
+git cherry-pick abc123
+```
+
+Used to hot-fix one change onto a release branch.
+
+## Conflict survival kit
+
+```bash
+git status
+# edit files
+git add .
+git merge --continue     # or git rebase --continue
+git merge --abort
+git rebase --abort
+```
+
+## What *not* to do at work
+
+- commit `.env`, keys, `node_modules`
+- `git push --force` to `main`
+- commit on `main` for features (use a branch + PR)
+- giant commits: “fix stuff”
+- `git reset --hard` when you don’t know what you’ll lose
+- rewrite published history
+
+---
+
+# One full story: your commands as a movie
+
+```
+1. git init
+   → empty database, unborn branch
+
+2. git add README.md
+   → blob stored, index updated, still no history
+
+3. git commit -m "first commit"
+   → tree + commit created, main/master now points at it
+
+4. git branch -M main
+   → pointer renamed to main
+
+5. git remote add origin https://...
+   → URL saved locally, GitHub still empty of *your* commits
+
+6. git push -u origin main
+   → objects uploaded, GitHub main created, tracking set
+   → THIS is the first moment internet was required
+
+7. git log
+   → walk commit parents from HEAD
+
+8. git commit -a
+   → auto-stage tracked modifications, new commit, main moves forward
+   → not pushed until you git push
+
+9. git rm --cached secret.env
+   → next commit will not contain that file; disk copy stays
+```
+
+Meanwhile, hashes identified every blob/tree/commit. Staging decided *what* went into each snapshot. Internet only moved objects to GitHub.
+
+---
+
+# How to actually become professional (not just read this)
+
+Do this on a throwaway folder, not a real job repo:
+
+1. `git init`, add a file, commit, run `git cat-file -p HEAD`
+2. Edit the file, `git add`, `git diff --cached`, commit again
+3. Create a branch, commit, switch back, `git log --oneline --graph --all`
+4. Merge, then make a conflict on purpose and resolve it
+5. Make a GitHub repo, add remote, push, open a PR to yourself
+6. Create an annotated tag and push it
+7. Practice `git rm --cached` + `.gitignore`
+8. Practice `git revert` vs `git reset` until the difference is obvious
+
+If you want a **part 2**, I can walk through `rebase`, `reflog`, `cherry-pick`, `bisect`, `hooks`, and a real **team Git workflow** (GitHub Flow vs Git Flow) using this CloudOps repo as the example. Say which of those you want next, or paste a `git status` / error and I’ll map it onto this model.
