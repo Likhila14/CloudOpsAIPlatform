@@ -1,0 +1,389 @@
+================================================================================
+CloudOps AI Platform — DOCKER BASICS (0 → Interview Ready)
+Covers: WI-012, WI-013, WI-236, WI-237, WI-238, WI-265 (+ deploy-service later)
+================================================================================
+
+Docker packages apps + dependencies into IMAGES that run as CONTAINERS.
+CloudOps uses Docker for:
+  - local Postgres/Redis
+  - building/running auth-service etc.
+  - deployment-service builds images from uploaded Dockerfiles
+  - later: push to registry, run on Kubernetes
+
+Order:
+  01 Why containers
+  02 Image vs container
+  03 Install / verify (WI-012)
+  04 Core commands
+  05 Dockerfile deep dive
+  06 Layers & cache
+  07 .dockerignore
+  08 Volumes & ports
+  09 Logs, exec, debug
+  10 Docker Compose
+  11 Best practices (multi-stage, non-root)
+  12 CloudOps mapping
+  13 Interview bank
+  14 Practice + done
+
+
+================================================================================
+01. WHY CONTAINERS?
+================================================================================
+
+Problem: "works on my machine"
+  Different Python versions, system libs, configs.
+
+Container: isolated process with its own filesystem view, built from an image.
+Same image runs the same way on laptop, CI, and (conceptually) Kubernetes nodes.
+
+
+================================================================================
+02. IMAGE VS CONTAINER
+================================================================================
+
+IMAGE
+  Immutable template (layered filesystem + metadata + default command).
+  Like a class / golden snapshot.
+
+CONTAINER
+  Running (or stopped) instance of an image.
+  Like an object created from the class.
+
+  Image:  python:3.12-slim
+  Container: auth-service process using that image + your code
+
+Registry: place that stores images (Docker Hub, GHCR).
+  postgres:16  means image name postgres, tag 16.
+
+
+================================================================================
+03. INSTALL / VERIFY (WI-012)
+================================================================================
+
+Windows: install Docker Desktop, start it.
+
+  docker version
+  docker run hello-world
+
+Done when hello-world prints success message.
+
+
+================================================================================
+04. CORE COMMANDS (MEMORIZE)
+================================================================================
+
+  docker images                 # list local images
+  docker ps                     # running containers
+  docker ps -a                  # include stopped
+  docker pull postgres:16       # download image
+  docker run ...                # create + start container
+  docker start|stop|restart ID
+  docker rm ID                  # remove container
+  docker rmi IMAGE              # remove image
+  docker logs ID                # stdout/stderr
+  docker logs -f ID             # follow
+  docker exec -it ID bash       # shell inside (or sh)
+  docker inspect ID
+  docker system prune           # cleanup (careful)
+
+
+docker run common flags:
+  -d                    detached (background)
+  --name auth-db
+  -p 5432:5432          host:container port publish
+  -e POSTGRES_PASSWORD=secret
+  -v volume:/var/lib/postgresql/data
+  --rm                  remove when stopped
+
+Example Postgres:
+  docker run -d --name cloudops-pg \
+    -e POSTGRES_USER=cloudops \
+    -e POSTGRES_PASSWORD=cloudops \
+    -e POSTGRES_DB=auth \
+    -p 5432:5432 \
+    postgres:16
+
+
+================================================================================
+05. DOCKERFILE DEEP DIVE (WI-013)
+================================================================================
+
+Dockerfile = recipe to BUILD an image.
+
+Tiny Python API example:
+
+  # syntax=docker/dockerfile:1
+  FROM python:3.12-slim
+
+  WORKDIR /app
+
+  COPY requirements.txt .
+  RUN pip install --no-cache-dir -r requirements.txt
+
+  COPY app ./app
+
+  ENV PORT=8000
+  EXPOSE 8000
+
+  CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+Instructions you must know:
+
+  FROM        base image
+  WORKDIR     set working directory
+  COPY/ADD    copy files (prefer COPY)
+  RUN         execute build-time command (creates layer)
+  ENV         environment variable
+  EXPOSE      documents port (does not publish by itself)
+  CMD         default start command (can be overridden)
+  ENTRYPOINT  fixed entry executable (advanced)
+  USER        run as non-root (best practice)
+  ARG         build-time args
+
+Build & run:
+  docker build -t cloudops-auth:dev .
+  docker run --rm -p 8000:8000 cloudops-auth:dev
+
+Tag meaning:
+  cloudops-auth:dev
+    │            │
+    name         tag (version/channel)
+
+
+================================================================================
+06. LAYERS & CACHE
+================================================================================
+
+Each Dockerfile instruction creates a LAYER.
+Docker caches layers. If COPY requirements.txt unchanged, pip install layer reused.
+
+Order tip (faster rebuilds):
+  1) copy dependency manifests
+  2) install deps
+  3) copy application code
+
+Bad order (rebuild pip every code change):
+  COPY . .
+  RUN pip install -r requirements.txt
+
+
+INTERVIEW
+Q: What is an image layer?
+A. A filesystem diff from a Dockerfile step; cached and shared between images.
+
+
+================================================================================
+07. .dockerignore
+================================================================================
+
+Like .gitignore for build context. Speeds builds + avoids leaking secrets.
+
+  .venv
+  __pycache__
+  .git
+  .env
+  *.pyc
+  .pytest_cache
+  docs
+
+Never COPY .env with secrets into images.
+
+
+================================================================================
+08. PORTS, VOLUMES, BIND MOUNTS (WI-237)
+================================================================================
+
+PORTS
+  -p 8000:8000 maps host port → container port
+  Container listens on 0.0.0.0 inside for external access
+
+VOLUMES (named)
+  Persist data beyond container lifetime (Postgres data).
+
+  docker volume create pgdata
+  docker run -v pgdata:/var/lib/postgresql/data ...
+
+BIND MOUNT
+  Mount host folder into container (dev hot-reload).
+
+  -v ${PWD}/app:/app/app
+
+
+================================================================================
+09. LOGS & DEBUG
+================================================================================
+
+  docker logs -f cloudops-pg
+  docker exec -it cloudops-pg psql -U cloudops -d auth
+  docker inspect cloudops-pg
+
+Exit codes / restart loops → check logs first.
+
+
+================================================================================
+10. DOCKER COMPOSE (WI-023, WI-238)
+================================================================================
+
+Compose = multi-container app definition (YAML).
+
+  services:
+    db:
+      image: postgres:16
+      environment:
+        POSTGRES_USER: cloudops
+        POSTGRES_PASSWORD: cloudops
+        POSTGRES_DB: auth
+      ports:
+        - "5432:5432"
+      volumes:
+        - pgdata:/var/lib/postgresql/data
+      healthcheck:
+        test: ["CMD-SHELL", "pg_isready -U cloudops -d auth"]
+        interval: 5s
+        timeout: 5s
+        retries: 10
+
+    auth:
+      build: ./auth-service
+      ports:
+        - "8000:8000"
+      environment:
+        DATABASE_URL: postgresql+psycopg://cloudops:cloudops@db:5432/auth
+      depends_on:
+        db:
+          condition: service_healthy
+
+  volumes:
+    pgdata:
+
+Commands:
+  docker compose up -d
+  docker compose ps
+  docker compose logs -f auth
+  docker compose restart auth
+  docker compose down
+  docker compose down -v          # also delete volumes (DESTROYS DB DATA)
+
+
+Note: inside compose network, hostname is service name (`db`), not localhost.
+
+
+================================================================================
+11. BEST PRACTICES (WI-265)
+================================================================================
+
+1) Small base images: python:3.12-slim (or distroless later)
+2) Multi-stage builds: build deps in builder stage, copy artifacts to runtime
+3) Non-root USER
+4) Pin versions (image tags, requirements)
+5) No secrets in image layers
+6) .dockerignore
+7) One process per container (API vs worker separate)
+8) HEALTHCHECK or orchestrator probes (/health)
+
+Multi-stage sketch:
+
+  FROM python:3.12-slim AS builder
+  WORKDIR /app
+  COPY requirements.txt .
+  RUN pip install --user -r requirements.txt
+
+  FROM python:3.12-slim
+  WORKDIR /app
+  COPY --from=builder /root/.local /root/.local
+  COPY app ./app
+  ENV PATH=/root/.local/bin:$PATH
+  USER nobody
+  CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+
+================================================================================
+12. CLOUDOPS MAPPING
+================================================================================
+
+  Local Postgres/Redis          → docker / compose
+  auth-service runtime          → Dockerfile + compose
+  deployment-service            → builds user Dockerfiles via Docker engine/SDK
+  CI (GitHub Actions)           → docker build + push GHCR
+  Kubernetes later              → runs containers from images
+
+
+================================================================================
+13. INTERVIEW BANK — DOCKER
+================================================================================
+
+Q1. Image vs container?
+A. Image=immutable template; container=running instance.
+
+Q2. What is a Dockerfile?
+A. Recipe of instructions to build an image.
+
+Q3. FROM / RUN / COPY / CMD?
+A. Base image; build command; copy files; default start process.
+
+Q4. CMD vs ENTRYPOINT?
+A. CMD default args/command (easy override); ENTRYPOINT fixed executable.
+
+Q5. What does EXPOSE do?
+A. Documents port; publishing still needs -p / compose ports.
+
+Q6. What are layers?
+A. Cached filesystem diffs from instructions.
+
+Q7. Why copy requirements before app code?
+A. Better build cache for pip install.
+
+Q8. .dockerignore purpose?
+A. Exclude files from build context (speed + safety).
+
+Q9. docker ps vs images?
+A. ps=containers; images=local images.
+
+Q10. How see app errors?
+A. docker logs / compose logs.
+
+Q11. How get a shell in container?
+A. docker exec -it <id> sh
+
+Q12. Named volume vs bind mount?
+A. Volume managed by Docker (data); bind mount maps host path (dev).
+
+Q13. What is Docker Compose?
+A. YAML to run multi-container apps as a unit.
+
+Q14. Why service DNS name `db` not localhost in compose?
+A. Containers share a network; localhost is the container itself.
+
+Q15. Multi-stage build benefit?
+A. Smaller/safer final image without build toolchains.
+
+Q16. Why non-root user?
+A. Reduce blast radius if container compromised.
+
+Q17. What is a tag?
+A. Image version label (:16, :dev, :sha-abc).
+
+Q18. How CloudOps deploy service uses Docker?
+A. Accepts Dockerfile/context, builds image via Docker API/SDK.
+
+Q19. docker compose down -v risk?
+A. Deletes volumes → lose Postgres data.
+
+Q20. Container stopped — is data gone?
+A. Container writable layer may remain until rm; use volumes for persistence.
+
+
+================================================================================
+14. PRACTICE + DONE
+================================================================================
+
+WI-012: [ ] docker version  [ ] hello-world ran
+WI-013: [ ] write Dockerfile  [ ] build tag  [ ] run -p  [ ] logs  [ ] explain layers
+WI-236: [ ] ps stop rm images prune
+WI-237: [ ] volume + bind mount once
+WI-238: [ ] compose up/down/logs/restart
+WI-265: [ ] read multi-stage + non-root; rewrite sample
+
+END OF DOCKER BASICS
+================================================================================

@@ -1,0 +1,448 @@
+================================================================================
+CloudOps AI Platform — FastAPI + OpenAPI (0 → Interview Ready)
+Covers: WI-021, WI-022, WI-245, WI-246, WI-247 (+ auth-service foundation)
+Prereqs: PythonBasics, PythonHTTP
+================================================================================
+
+FastAPI is the web framework for CloudOps services:
+  auth-service, deployment-service, monitoring-service, ai-agent, ...
+
+It gives you:
+  - Python functions as HTTP endpoints
+  - Pydantic validation
+  - Automatic OpenAPI docs at /docs and /redoc
+  - Dependency injection (DB sessions, current user)
+  - ASGI performance via Uvicorn
+
+Order:
+  01 What FastAPI is / ASGI
+  02 Hello world + uvicorn
+  03 Path operations
+  04 Path & query params
+  05 Request body + response_model
+  06 Status codes & errors
+  07 Dependencies (Depends)
+  08 Routers & project layout
+  09 OpenAPI /docs deep dive
+  10 Pydantic role
+  11 Auth-shaped patterns
+  12 Testing intro
+  13 Interview bank
+  14 Practice + done
+
+
+================================================================================
+01. WHAT FastAPI IS / ASGI
+================================================================================
+
+WSGI (older): Flask/Django sync model historically
+ASGI (newer): async-capable server interface — FastAPI/Starlette use this
+
+Uvicorn = ASGI server that runs your FastAPI app.
+
+Mental model:
+
+  HTTP request
+      │
+      ▼
+   Uvicorn (ASGI server)
+      │
+      ▼
+   FastAPI app (routing + deps + validation)
+      │
+      ▼
+   your Python endpoint function
+      │
+      ▼
+   JSON response
+
+Why FastAPI fits CloudOps:
+  - typed Python ↔ clear API contracts
+  - auto docs for every service
+  - easy JWT/Depends auth patterns
+  - great for microservices
+
+
+================================================================================
+02. HELLO WORLD (WI-022)
+================================================================================
+
+auth-service/requirements.txt:
+  fastapi
+  uvicorn[standard]
+
+auth-service/app/main.py:
+
+  from fastapi import FastAPI
+
+  app = FastAPI(
+      title="CloudOps Auth Service",
+      description="JWT + RBAC + API keys for CloudOps AI Platform",
+      version="0.1.0",
+  )
+
+  @app.get("/health")
+  def health():
+      return {"status": "ok"}
+
+Run:
+  uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+
+Open:
+  http://localhost:8000/health
+  http://localhost:8000/docs      ← Swagger UI
+  http://localhost:8000/redoc     ← ReDoc
+  http://localhost:8000/openapi.json
+
+`app.main:app` means:
+  module path app/main.py  →  variable named app
+
+
+================================================================================
+03. PATH OPERATIONS (ROUTES)
+================================================================================
+
+Decorator binds HTTP method + path to function:
+
+  @app.get("/health")
+  @app.post("/auth/login")
+  @app.put("/users/{user_id}")
+  @app.patch("/users/{user_id}")
+  @app.delete("/api-keys/{key_id}")
+
+One function = one operation (usually).
+
+Tags (organize docs):
+  @app.get("/health", tags=["system"])
+
+
+================================================================================
+04. PATH PARAMS & QUERY PARAMS (WI-245)
+================================================================================
+
+PATH PARAM — part of URL path:
+
+  @app.get("/users/{user_id}")
+  def get_user(user_id: int):
+      return {"user_id": user_id}
+
+  GET /users/42 → user_id=42
+
+QUERY PARAM — after ?:
+
+  @app.get("/users")
+  def list_users(limit: int = 20, role: str | None = None):
+      return {"limit": limit, "role": role}
+
+  GET /users?limit=10&role=admin
+
+Rules of thumb:
+  path = identify resource
+  query = filter/sort/pagination/flags
+
+
+================================================================================
+05. REQUEST BODY + response_model (WI-246)
+================================================================================
+
+Pydantic model = schema:
+
+  from pydantic import BaseModel, EmailStr, Field
+
+  class LoginRequest(BaseModel):
+      email: EmailStr
+      password: str = Field(min_length=8)
+
+  class TokenResponse(BaseModel):
+      access_token: str
+      token_type: str = "bearer"
+
+  @app.post("/auth/login", response_model=TokenResponse)
+  def login(body: LoginRequest):
+      # verify user...
+      return TokenResponse(access_token="jwt...")
+
+Flow:
+  JSON body → Pydantic validates → endpoint gets model → return model/dict
+  → response_model filters/serializes → JSON
+
+If invalid body → 422 Unprocessable Entity (automatic)
+
+
+================================================================================
+06. STATUS CODES & HTTP EXCEPTIONS
+================================================================================
+
+  from fastapi import status, HTTPException
+
+  @app.post("/auth/register", status_code=status.HTTP_201_CREATED)
+  def register(...):
+      ...
+
+  raise HTTPException(
+      status_code=status.HTTP_401_UNAUTHORIZED,
+      detail="Invalid credentials",
+  )
+
+Common CloudOps mapping:
+  200 OK
+  201 Created          register / create resource
+  202 Accepted         async deploy accepted
+  204 No Content       delete
+  401 Unauthorized     bad/missing token
+  403 Forbidden        RBAC deny
+  404 Not Found
+  409 Conflict         email exists
+  422 Validation error
+  500 Unhandled bug
+
+
+================================================================================
+07. DEPENDENCIES (Depends) — WI-247 CRITICAL
+================================================================================
+
+Dependencies = reusable units FastAPI injects into endpoints.
+
+  from fastapi import Depends
+
+  def get_settings():
+      return Settings()  # from env
+
+  @app.get("/info")
+  def info(settings = Depends(get_settings)):
+      return {"env": settings.env}
+
+DB session pattern (used with SQLAlchemy):
+
+  def get_db():
+      db = SessionLocal()
+      try:
+          yield db
+      finally:
+          db.close()
+
+  @app.get("/users/me")
+  def me(db: Session = Depends(get_db)):
+      ...
+
+Auth dependency sketch:
+
+  def get_current_user(authorization: str | None = Header(default=None),
+                       db: Session = Depends(get_db)) -> User:
+      if not authorization or not authorization.startswith("Bearer "):
+          raise HTTPException(401, "Not authenticated")
+      token = authorization.removeprefix("Bearer ")
+      # verify JWT, load user
+      ...
+
+  def require_admin(user: User = Depends(get_current_user)) -> User:
+      if user.role != "admin":
+          raise HTTPException(403, "Forbidden")
+      return user
+
+Think:
+
+  Request → Depends chain → endpoint → Response
+               │
+               ├─ get_db()
+               └─ get_current_user()
+
+
+================================================================================
+08. ROUTERS & PROJECT LAYOUT
+================================================================================
+
+Don't put everything in main.py.
+
+  app/
+    main.py                 # create app, include routers
+    api/
+      routes/
+        health.py
+        auth.py
+        users.py
+    schemas/
+      auth.py
+    models/
+      user.py
+    db/
+      session.py
+    core/
+      config.py
+    services/
+      auth_service.py
+
+main.py:
+
+  from fastapi import FastAPI
+  from app.api.routes import health, auth
+
+  app = FastAPI(title="CloudOps Auth Service", version="0.1.0")
+  app.include_router(health.router, tags=["system"])
+  app.include_router(auth.router, prefix="/auth", tags=["auth"])
+
+health.py:
+
+  from fastapi import APIRouter
+  router = APIRouter()
+
+  @router.get("/health")
+  def health():
+      return {"status": "ok"}
+
+
+================================================================================
+09. OpenAPI /docs DEEP DIVE (WI-021)
+================================================================================
+
+OpenAPI = machine-readable API description (JSON/YAML).
+FastAPI generates it from your types, models, paths, status codes.
+
+Swagger UI (/docs):
+  - Try endpoints interactively
+  - See schemas, examples, auth requirements
+
+ReDoc (/redoc):
+  - Readable reference docs
+
+openapi.json:
+  - Used by clients, codegen, API gateways, AI tools later (RAG ingest)
+
+Improve docs quality:
+  - title, description, version on FastAPI()
+  - response_model=
+  - status_code=
+  - tags=
+  - summary= / description= on routes
+  - Field(description=...) on Pydantic
+  - document security schemes for JWT (later)
+
+Interview:
+  "OpenAPI is the contract. FastAPI builds it automatically from Python types."
+
+
+================================================================================
+10. PYDANTIC'S ROLE
+================================================================================
+
+BaseModel:
+  - validate input
+  - coerce types when safe
+  - serialize output
+  - generate JSON Schema for OpenAPI
+
+Separate schemas from ORM models:
+  UserCreate (email, password)     — input
+  UserRead (id, email, role)       — output NEVER includes hashed_password
+  User (SQLAlchemy)                — DB table mapping
+
+
+================================================================================
+11. AUTH-SHAPED PATTERNS (PREVIEW)
+================================================================================
+
+  POST /auth/register  → 201 UserRead
+  POST /auth/login     → 200 TokenResponse
+  GET  /users/me       → 200 UserRead (Depends get_current_user)
+  POST /api-keys       → 201 (admin/operator)
+  GET  /health         → 200 (no auth)
+
+CORS (when frontend exists):
+  from fastapi.middleware.cors import CORSMiddleware
+  app.add_middleware(CORSMiddleware, allow_origins=[...], ...)
+
+
+================================================================================
+12. TESTING INTRO
+================================================================================
+
+  from fastapi.testclient import TestClient
+  from app.main import app
+
+  client = TestClient(app)
+
+  def test_health():
+      r = client.get("/health")
+      assert r.status_code == 200
+      assert r.json()["status"] == "ok"
+
+
+================================================================================
+13. INTERVIEW BANK — FastAPI / OpenAPI
+================================================================================
+
+Q1. What is FastAPI?
+A. Modern Python ASGI web framework for APIs with typing + auto docs.
+
+Q2. What is Uvicorn?
+A. ASGI server that runs FastAPI apps.
+
+Q3. WSGI vs ASGI?
+A. ASGI supports async and modern features; FastAPI is ASGI-native.
+
+Q4. What does @app.get("/health") do?
+A. Registers endpoint function for HTTP GET /health.
+
+Q5. Path vs query parameter?
+A. Path in URL segments; query after ?.
+
+Q6. How is JSON body validated?
+A. Via Pydantic models declared as endpoint parameters.
+
+Q7. What is response_model?
+A. Declares/filters response schema; appears in OpenAPI.
+
+Q8. What is 422 in FastAPI?
+A. Validation error from Pydantic/request parsing.
+
+Q9. What is Depends?
+A. Dependency injection for shared logic (DB, auth, settings).
+
+Q10. Why yield in get_db?
+A. Setup session before request; close after response.
+
+Q11. What is OpenAPI?
+A. Standard API description format; FastAPI auto-generates it.
+
+Q12. /docs vs /redoc vs /openapi.json?
+A. Swagger UI; ReDoc UI; raw OpenAPI schema.
+
+Q13. Why FastAPI for CloudOps microservices?
+A. Speed of development, validation, docs, DI, async, typing.
+
+Q14. HTTPException purpose?
+A. Return controlled error status + detail JSON.
+
+Q15. APIRouter purpose?
+A. Split routes into modules; include with prefixes/tags.
+
+Q16. How protect routes?
+A. Depends(get_current_user) / role checkers raising 401/403.
+
+Q17. Why not return ORM objects directly forever?
+A. Leak fields, lazy-load issues; use response schemas.
+
+Q18. What is --reload?
+A. Dev auto-restart on code change; not for production.
+
+Q19. Host 0.0.0.0 meaning?
+A. Listen on all interfaces — needed inside Docker.
+
+Q20. How does typing help docs?
+A. Annotations drive schemas, validation, and OpenAPI generation.
+
+
+================================================================================
+14. PRACTICE + DONE
+================================================================================
+
+WI-021: [ ] explain FastAPI fit  [ ] open /docs  [ ] explain OpenAPI
+WI-022: [ ] app/main.py health  [ ] uvicorn runs  [ ] /docs loads
+WI-245: [ ] path + query demo endpoints
+WI-246: [ ] body model + response_model
+WI-247: [ ] Depends demo (settings or fake db)
+
+Next: SQLAlchemy notes → wire User model + get_db into auth-service.
+
+END OF FastAPI NOTES
+================================================================================

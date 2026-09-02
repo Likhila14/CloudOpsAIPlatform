@@ -1,0 +1,509 @@
+================================================================================
+CloudOps AI Platform — SQLAlchemy 2.0 + User Model / DB Session
+Covers: WI-024 (learn) + WI-025 (build) — auth-service foundation
+Prereqs: PythonBasics, SQLBasics, FastAPI notes
+================================================================================
+
+SQLAlchemy = Python ORM + SQL toolkit.
+ORM = Object-Relational Mapper: Python classes ↔ database tables.
+
+In CloudOps auth-service:
+  class User(Base): ...   ↔   table users
+  session                 ↔   DB transaction / connection unit
+  get_db Depends          ↔   one session per request
+
+Order:
+  01 Why ORM
+  02 SQLAlchemy 2.0 mental model
+  03 Engine
+  04 Sessions
+  05 Declarative models
+  06 User model (WI-025 exact shape)
+  07 database.py / session wiring
+  08 FastAPI get_db dependency
+  09 CRUD with Session (2.0 style)
+  10 Pydantic vs ORM (again)
+  11 Migrations note (Alembic)
+  12 Common pitfalls
+  13 Full minimal file set for WI-025
+  14 Interview bank
+  15 Done criteria
+
+
+================================================================================
+01. WHY ORM?
+================================================================================
+
+Without ORM you write raw SQL strings everywhere.
+With ORM:
+  - models live in Python
+  - less boilerplate for simple CRUD
+  - safer composition (less string SQL bugs)
+  - still can use raw SQL when needed
+
+CloudOps still needs SQL knowledge (JOINs, indexes) — ORM does not replace SQL brains.
+
+
+================================================================================
+02. SQLAlchemy 2.0 MENTAL MODEL
+================================================================================
+
+Pieces:
+
+  Engine     — connection factory to Postgres
+  Session    — conversation with DB (unit of work)
+  Model      — declarative class mapped to a table
+  Result     — output of execute/scalars queries
+
+Flow:
+
+  DATABASE_URL
+      │
+      ▼
+   create_engine(...)
+      │
+      ▼
+   SessionLocal = sessionmaker(bind=engine)
+      │
+      ▼
+   session = SessionLocal()
+      │
+      ├─ add(User(...))
+      ├─ execute(select(User).where(...))
+      ├─ commit() / rollback()
+      └─ close()
+
+
+SQLAlchemy 1.x style used session.query(User)...
+SQLAlchemy 2.0 prefers:
+  session.execute(select(User).where(User.email == email))
+  session.scalars(...).first()
+
+Learn 2.0 style for this project.
+
+
+================================================================================
+03. ENGINE
+================================================================================
+
+  from sqlalchemy import create_engine
+  import os
+
+  DATABASE_URL = os.getenv(
+      "DATABASE_URL",
+      "postgresql+psycopg://cloudops:cloudops@localhost:5432/auth",
+  )
+
+  engine = create_engine(
+      DATABASE_URL,
+      pool_pre_ping=True,   # detect stale connections
+  )
+
+URL shape:
+  postgresql+psycopg://USER:PASSWORD@HOST:PORT/DBNAME
+                 │
+                 driver (psycopg v3)
+
+Never commit real passwords; use .env locally.
+
+
+================================================================================
+04. SESSIONS
+================================================================================
+
+Session = workspace for loading/saving objects.
+
+  from sqlalchemy.orm import sessionmaker, Session
+
+  SessionLocal = sessionmaker(
+      bind=engine,
+      autoflush=False,
+      autocommit=False,
+  )
+
+Typical unit of work:
+  1. open session
+  2. read/write objects
+  3. commit (or rollback on error)
+  4. close
+
+In FastAPI: do this per request via Depends(get_db).
+
+
+INTERVIEW
+Q: What is a Session?
+A. ORM handle for a transaction-ish unit of work against the database.
+
+
+================================================================================
+05. DECLARATIVE MODELS
+================================================================================
+
+  from datetime import datetime, timezone
+  from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+  from sqlalchemy import String, Boolean, DateTime, BigInteger
+
+  class Base(DeclarativeBase):
+      pass
+
+  class User(Base):
+      __tablename__ = "users"
+
+      id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+      email: Mapped[str] = mapped_column(String(320), unique=True, index=True, nullable=False)
+      hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
+      role: Mapped[str] = mapped_column(String(50), nullable=False, default="viewer")
+      is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+      created_at: Mapped[datetime] = mapped_column(
+          DateTime(timezone=True),
+          nullable=False,
+          default=lambda: datetime.now(timezone.utc),
+      )
+
+Notes:
+  Mapped[] + mapped_column = SQLAlchemy 2.0 typing style
+  __tablename__ must match DB table
+  unique/index on email for login lookups
+
+
+================================================================================
+06. USER MODEL FIELDS — WHY EACH (WI-025)
+================================================================================
+
+Field              Why
+-----------------  --------------------------------------------------
+id                 Primary key
+email              Login identity; UNIQUE
+hashed_password    NEVER store plaintext password
+role               RBAC: admin / viewer / operator
+is_active          Disable account without delete
+created_at         Audit / debugging
+
+Later tables (not required for WI-025 yet):
+  api_keys, refresh_tokens, audit_logs — FK to users.id
+
+
+================================================================================
+07. database.py / session WIRING
+================================================================================
+
+Suggested files:
+
+  app/db/session.py   — engine, SessionLocal, get_db
+  app/db/base.py      — DeclarativeBase
+  app/models/user.py  — User model
+  app/core/config.py  — settings from env
+
+app/core/config.py (simple):
+
+  import os
+  from pydantic_settings import BaseSettings  # or plain os.getenv early on
+
+  class Settings(BaseSettings):
+      database_url: str = "postgresql+psycopg://cloudops:cloudops@localhost:5432/auth"
+      class Config:
+          env_file = ".env"
+
+  settings = Settings()
+
+app/db/base.py:
+
+  from sqlalchemy.orm import DeclarativeBase
+  class Base(DeclarativeBase):
+      pass
+
+app/db/session.py:
+
+  from collections.abc import Generator
+  from sqlalchemy import create_engine
+  from sqlalchemy.orm import Session, sessionmaker
+  from app.core.config import settings
+
+  engine = create_engine(settings.database_url, pool_pre_ping=True)
+  SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+  def get_db() -> Generator[Session, None, None]:
+      db = SessionLocal()
+      try:
+          yield db
+      finally:
+          db.close()
+
+
+================================================================================
+08. FastAPI get_db DEPENDENCY
+================================================================================
+
+  from fastapi import Depends
+  from sqlalchemy.orm import Session
+  from app.db.session import get_db
+  from app.models.user import User
+  from sqlalchemy import select
+
+  @app.get("/users/count")
+  def users_count(db: Session = Depends(get_db)):
+      count = db.scalar(select(func.count()).select_from(User))
+      return {"count": count}
+
+Lifecycle:
+
+  request in
+    → SessionLocal()
+    → endpoint runs
+    → success: you commit where needed
+    → finally: db.close()
+  response out
+
+
+================================================================================
+09. CRUD WITH SESSION (2.0 STYLE)
+================================================================================
+
+Create:
+  user = User(
+      email="a@cloudops.local",
+      hashed_password="...",  # from password hasher
+      role="admin",
+  )
+  db.add(user)
+  db.commit()
+  db.refresh(user)          # reload DB defaults (id, created_at)
+
+Read by email:
+  stmt = select(User).where(User.email == email)
+  user = db.scalars(stmt).first()
+
+Read by id:
+  user = db.get(User, user_id)
+
+Update:
+  user.role = "operator"
+  db.commit()
+  db.refresh(user)
+
+Delete:
+  db.delete(user)
+  db.commit()
+
+Rollback on error:
+  try:
+      db.add(user)
+      db.commit()
+  except Exception:
+      db.rollback()
+      raise
+
+
+================================================================================
+10. PYDANTIC vs SQLAlchemy (CLASSIC)
+================================================================================
+
+Pydantic schema (API):
+  class UserCreate(BaseModel):
+      email: EmailStr
+      password: str
+      role: str = "viewer"
+
+  class UserRead(BaseModel):
+      id: int
+      email: EmailStr
+      role: str
+      is_active: bool
+      model_config = ConfigDict(from_attributes=True)
+
+ORM model (DB):
+  class User(Base): ... includes hashed_password
+
+Conversion:
+  # create
+  user = User(email=payload.email, hashed_password=hash(payload.password), role=payload.role)
+  # response
+  return UserRead.model_validate(user)
+
+NEVER return hashed_password in API responses.
+
+
+================================================================================
+11. MIGRATIONS NOTE (ALEMBIC — NEXT WIs)
+================================================================================
+
+WI-025 may create tables with Base.metadata.create_all(bind=engine) for learning.
+Production path = Alembic migrations (WI-026+):
+  - versioned schema changes
+  - upgrade/downgrade
+  - team-safe
+
+Know:
+  create_all = quick local bootstrap
+  Alembic = real workflow
+
+
+================================================================================
+12. COMMON PITFALLS
+================================================================================
+
+1) Passing Pydantic model to db.add — must be ORM instance
+2) Forgetting commit — changes not persisted
+3) Using closed session after request
+4) Lazy loading after session closed (DetachedInstanceError)
+5) Blocking secrets in DATABASE_URL committed to git
+6) Mixing session.query (1.x) randomly without understanding
+7) create_all in production instead of migrations
+8) Returning ORM with password hash accidentally
+
+
+================================================================================
+13. MINIMAL FILE SET FOR WI-025
+================================================================================
+
+Goal definition of done:
+  [ ] User model exists (id, email, hashed_password, role, created_at [+ is_active recommended])
+  [ ] database engine + SessionLocal
+  [ ] get_db dependency wired
+  [ ] App starts with DB URL from env
+  [ ] Postgres running (compose from WI-023)
+
+Checklist build order:
+  1. docker compose up postgres
+  2. set DATABASE_URL in .env
+  3. add deps: sqlalchemy, psycopg[binary], pydantic-settings (optional)
+  4. write Base + User + session + get_db
+  5. import User model in app startup
+  6. optional: create_all on startup for local only
+  7. hit /health still 200; verify connection with a tiny /users/count or db execute
+
+Example startup create_all (local only):
+
+  from app.db.base import Base
+  from app.db.session import engine
+  import app.models.user  # noqa: F401 ensure model registered
+
+  @app.on_event("startup")  # or lifespan handler (preferred modern)
+  def on_startup():
+      Base.metadata.create_all(bind=engine)
+
+Prefer lifespan API in modern FastAPI:
+
+  from contextlib import asynccontextmanager
+
+  @asynccontextmanager
+  async def lifespan(app: FastAPI):
+      Base.metadata.create_all(bind=engine)
+      yield
+
+  app = FastAPI(lifespan=lifespan, ...)
+
+
+Verify in psql:
+  docker exec -it <pg> psql -U cloudops -d auth
+  \dt
+  \d users
+
+
+================================================================================
+14. INTERVIEW BANK — SQLAlchemy + User/DB
+================================================================================
+
+Q1. What is an ORM?
+A. Maps classes/objects to tables/rows so you can work in Python.
+
+Q2. What is SQLAlchemy?
+A. Python SQL toolkit + ORM used widely with FastAPI.
+
+Q3. Engine vs Session?
+A. Engine=connection pool/factory; Session=unit of work for ORM ops.
+
+Q4. What is DeclarativeBase?
+A. Base class for declarative models in SQLAlchemy 2.0.
+
+Q5. Mapped / mapped_column?
+A. 2.0 typed way to declare columns on models.
+
+Q6. Why pool_pre_ping?
+A. Checks connections so stale DB connections are recycled safely.
+
+Q7. Why get_db uses yield?
+A. Creates session for request and closes it afterward (FastAPI Depends).
+
+Q8. db.add vs commit?
+A. add stages object; commit writes transaction to DB.
+
+Q9. db.refresh purpose?
+A. Reload object from DB (id/defaults/server values).
+
+Q10. select(User).where(...) vs old query()?
+A. 2.0 style execute/scalars API vs legacy Query API.
+
+Q11. Why index/unique email?
+A. Fast login lookup + prevent duplicate accounts.
+
+Q12. Why hashed_password not password?
+A. Security — store hash only.
+
+Q13. Pydantic model vs SQLAlchemy model?
+A. API validation/schema vs DB mapping — different jobs.
+
+Q14. What is DetachedInstanceError?
+A. Accessing ORM attributes after session closed / object detached.
+
+Q15. create_all vs Alembic?
+A. create_all quick bootstrap; Alembic versioned migrations for real systems.
+
+Q16. How does DATABASE_URL get into app?
+A. Environment variable / settings object; not hardcoded secrets.
+
+Q17. What fields on CloudOps User?
+A. id, email, hashed_password, role, (is_active), created_at.
+
+Q18. How enforce RBAC with User.role?
+A. Auth dependency loads user; check role; 403 if insufficient.
+
+Q19. Relationship example later?
+A. User.api_keys one-to-many via FK user_id.
+
+Q20. What happens if commit fails?
+A. Rollback session; raise error; API returns 4xx/5xx as appropriate.
+
+Q21. Can you use raw SQL with SQLAlchemy?
+A. Yes — text() queries when ORM is awkward; still use binds for safety.
+
+Q22. SQL injection risk with ORM?
+A. ORM parameterizes values; still dangerous if you concatenate raw SQL strings.
+
+Q23. Why Session per request not global?
+A. Thread/concurrency safety + clean transaction boundaries.
+
+Q24. autoflush=False meaning?
+A. Don't automatically flush pending changes before every query (more control).
+
+Q25. How verify WI-025 done in interview?
+A. Show User model, session factory, get_db, env-based URL, app starts, table exists.
+
+
+================================================================================
+15. DONE CRITERIA
+================================================================================
+
+WI-024 LEARN:
+  [ ] Can sketch User model on paper
+  [ ] Can explain Engine, SessionLocal, get_db
+  [ ] Can explain 2.0 select/scalars style
+
+WI-025 BUILD:
+  [ ] models.py/user.py with User fields
+  [ ] database/session module with engine + SessionLocal
+  [ ] get_db dependency
+  [ ] DB URL from env
+  [ ] App starts against Postgres
+  [ ] users table visible in DB
+
+NEXT:
+  WI-026 Alembic
+  password hashing + register/login routes
+  JWT + Depends(get_current_user)
+
+SPINE:
+  HTTP → FastAPI → Pydantic → Service → SQLAlchemy Session → PostgreSQL
+
+END OF SQLAlchemy + USER/DB NOTES
+================================================================================

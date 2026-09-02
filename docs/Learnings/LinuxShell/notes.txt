@@ -1,0 +1,342 @@
+================================================================================
+CloudOps AI Platform — LINUX / SHELL BASICS FOR DEVOPS (0 → Interview Ready)
+Covers: WI-020 (+ daily Docker/K8s/CI command-line work)
+================================================================================
+
+Even on Windows you will use a Unix-like shell inside:
+  - Docker containers (Linux)
+  - GitHub Actions runners (often Ubuntu)
+  - Kubernetes pods (Linux)
+  - remote servers / WSL
+
+Learn Bash-style commands deeply. PowerShell is fine locally; production ops is Linux.
+
+Order:
+  01 Shell mental model
+  02 Filesystem navigation
+  03 Files: read, write, permissions
+  04 Searching: grep/find
+  05 Pipes, redirects, exit codes
+  06 Processes & env vars
+  07 Networking basics (curl, ports)
+  08 Users, permissions, sudo
+  09 Archives & disk
+  10 Scripting essentials
+  11 CloudOps daily command recipes
+  12 Interview bank
+  13 Practice + done
+
+
+================================================================================
+01. SHELL MENTAL MODEL
+================================================================================
+
+Shell = program that accepts text commands and runs programs.
+
+  you → bash/zsh/sh → OS kernel → processes/files/network
+
+Prompt shows where you are:
+  user@host:~/projects$
+
+Everything is (mostly) a file: disks, sockets, devices under paths.
+
+
+================================================================================
+02. FILESYSTEM NAVIGATION
+================================================================================
+
+  pwd                 print working directory
+  ls                  list
+  ls -la              long + hidden (dotfiles)
+  cd /path            change directory
+  cd ..               parent
+  cd ~                home
+  cd -                previous
+
+Paths:
+  /                   root
+  /home/user          home (Linux)
+  /etc                config
+  /var/log            logs
+  /tmp                temporary
+  ./file              relative current
+  /abs/path           absolute
+
+CloudOps in container:
+  WORKDIR /app
+  ls -la /app
+
+
+================================================================================
+03. FILES — CREATE, READ, EDIT, PERMISSIONS
+================================================================================
+
+  touch file.txt              create empty / update timestamp
+  mkdir -p a/b/c              make dirs nested
+  cp src dst                  copy
+  cp -r dir1 dir2             copy recursive
+  mv old new                  rename/move
+  rm file                     delete file
+  rm -r dir                   delete directory (careful)
+  rm -rf dir                  force recursive (DANGEROUS)
+
+Read:
+  cat file                    whole file
+  less file                   scroll (q quit)
+  head -n 50 file
+  tail -n 50 file
+  tail -f file                follow (logs!)
+
+Permissions (rwx):
+  ls -l
+  -rwxr-xr-x  user group  size date name
+   |||
+   owner / group / others
+
+  chmod +x script.sh          make executable
+  chmod 644 file              rw-r--r--
+  chmod 755 script            rwxr-xr-x
+  chown user:group file       change owner (needs privs)
+
+INTERVIEW
+Q: What does chmod 755 mean?
+A. Owner rwx; group rx; others rx — common for executables/dirs.
+
+
+================================================================================
+04. SEARCHING
+================================================================================
+
+  grep -R "DATABASE_URL" .            search recursively
+  grep -n "TODO" app/main.py          with line numbers
+  grep -i "error" /var/log/app.log    case insensitive
+
+  find . -name "*.py"
+  find . -type f -name "Dockerfile"
+
+  rg pattern                          # ripgrep if installed (faster)
+
+
+================================================================================
+05. PIPES, REDIRECTS, EXIT CODES
+================================================================================
+
+Pipes connect stdout → stdin:
+  docker logs auth 2>&1 | tail -n 100
+  cat users.csv | grep admin | wc -l
+
+Redirects:
+  cmd > out.txt           overwrite stdout
+  cmd >> out.txt          append
+  cmd 2> err.txt          stderr
+  cmd > all.txt 2>&1      both
+
+Exit codes:
+  echo $?                 0 = success; non-zero = failure
+  CI systems fail jobs on non-zero exits.
+
+  set -e                  in scripts: exit on first failure (good habit)
+
+
+================================================================================
+06. PROCESSES & ENVIRONMENT
+================================================================================
+
+  ps aux | grep uvicorn
+  top / htop              live process view
+  kill PID                terminate
+  kill -9 PID             force (last resort)
+
+Env vars:
+  echo $HOME
+  export DATABASE_URL=postgresql://...
+  env | grep DATABASE
+  printenv DATABASE_URL
+
+  unset DATABASE_URL
+
+CloudOps:
+  App config via env in Docker/K8s — same idea as os.getenv in Python.
+
+
+================================================================================
+07. NETWORKING BASICS FOR DEVOPS
+================================================================================
+
+  curl -i http://localhost:8000/health
+  curl -i -X POST http://localhost:8000/auth/login \
+    -H "Content-Type: application/json" \
+    -d '{"email":"a@b.com","password":"x"}'
+
+  curl -I URL                 headers only
+  wget URL                    download (if available)
+
+  ss -tulpn | grep 8000       listening ports (Linux)
+  # netstat older equivalent
+
+DNS / connectivity in containers:
+  ping is sometimes missing in slim images
+  use curl to service hostnames: curl http://db:5432 may fail (not HTTP)
+  use pg_isready for Postgres health
+
+
+================================================================================
+08. USERS, SUDO, SECURITY BASICS
+================================================================================
+
+  whoami
+  id
+  sudo cmd                    run as root (if allowed)
+
+Never run app containers as root if avoidable (Docker best practice).
+Secrets: prefer env/files mounted with tight permissions; never commit.
+
+
+================================================================================
+09. ARCHIVES & DISK
+================================================================================
+
+  tar -czf app.tgz app/       create gzip tarball
+  tar -xzf app.tgz            extract
+  zip/unzip                   sometimes used for build contexts
+
+  df -h                       disk free
+  du -sh *                    directory sizes
+
+
+================================================================================
+10. SCRIPTING ESSENTIALS
+================================================================================
+
+script.sh:
+  #!/usr/bin/env bash
+  set -euo pipefail
+
+  echo "starting"
+  cd /app
+  uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+  chmod +x script.sh
+  ./script.sh
+
+Variables:
+  NAME="auth"
+  echo "service=$NAME"
+
+Conditionals:
+  if [ -f .env ]; then
+    echo "env exists"
+  fi
+
+Loops:
+  for f in *.py; do
+    echo "$f"
+  done
+
+
+================================================================================
+11. CLOUDOPS DAILY RECIPES
+================================================================================
+
+Health check API:
+  curl -sf http://localhost:8000/health || echo FAIL
+
+Follow auth logs in compose:
+  docker compose logs -f auth
+
+Find password leaks before commit:
+  grep -R "PASSWORD" -n . --exclude-dir=.venv
+
+Watch test output:
+  pytest -q | tee test-out.txt
+
+Inside Postgres container:
+  docker exec -it cloudops-pg psql -U cloudops -d auth
+  \dt
+  SELECT * FROM users LIMIT 5;
+  \q
+
+CI mental model:
+  checkout → setup python → install → lint/test → docker build → push
+
+
+================================================================================
+12. INTERVIEW BANK — LINUX/SHELL
+================================================================================
+
+Q1. What is a shell?
+A. Command-line interface to run programs and scripts.
+
+Q2. Absolute vs relative path?
+A. Absolute from / ; relative from current directory.
+
+Q3. What does ls -la show?
+A. Hidden files + permissions/owner/size.
+
+Q4. cat vs less vs tail -f?
+A. Dump file; page file; follow growing logs.
+
+Q5. What is a pipe | ?
+A. Connects stdout of one command to stdin of next.
+
+Q6. Exit code 0 meaning?
+A. Success.
+
+Q7. chmod +x purpose?
+A. Allow execute permission — needed to run scripts.
+
+Q8. What is PATH?
+A. Directories searched for executables.
+
+Q9. export VAR=value?
+A. Sets environment variable for current shell and child processes.
+
+Q10. How inspect listening ports?
+A. ss -tulpn (or netstat).
+
+Q11. How call a JSON API from shell?
+A. curl with -H Content-Type and -d body.
+
+Q12. Why set -e in scripts?
+A. Stop on first failing command — fail fast in CI/deploy scripts.
+
+Q13. Difference between > and >>?
+A. Overwrite vs append.
+
+Q14. What is stderr vs stdout?
+A. Error stream vs normal output; both matter for logs.
+
+Q15. Why Linux skills for CloudOps on Windows laptop?
+A. Containers/CI/K8s workloads are Linux environments.
+
+Q16. How find which process uses a port (concept)?
+A. ss/lsof + grep port; then kill if appropriate.
+
+Q17. What does grep -R do?
+A. Recursive content search — find config/secrets/usages.
+
+Q18. tar.gz purpose?
+A. Package/compress directories (build contexts, releases).
+
+Q19. sudo risks?
+A. Elevates privileges; mistakes can break system/security.
+
+Q20. Shell vs PowerShell?
+A. Different syntax; learn Bash for DevOps portability.
+
+
+================================================================================
+13. PRACTICE + DONE (WI-020)
+================================================================================
+
+[ ] Navigate with pwd/ls/cd
+[ ] Create dirs/files; cat/tail -f a log
+[ ] grep -R a string in project
+[ ] Pipe + redirect example
+[ ] export an env var and read in python os.getenv
+[ ] curl /health style request
+[ ] Write tiny bash script with set -e and chmod +x
+[ ] docker exec into postgres and run \dt
+
+END OF LINUX/SHELL BASICS
+================================================================================

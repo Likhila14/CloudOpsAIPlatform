@@ -1,0 +1,441 @@
+================================================================================
+CloudOps AI Platform — SQL BASICS (0 → Interview Ready)
+Covers: WI-011 (+ foundations for auth users, deployments, audit logs)
+Companion: PythonBasics | PythonHTTP | SQLAlchemy notes
+================================================================================
+
+PostgreSQL stores CloudOps data: users, roles, deployments, audit logs, API keys.
+SQL is the language you speak to that database. SQLAlchemy later wraps SQL in Python,
+but you MUST understand SQL first.
+
+Order:
+  01 What is a relational DB
+  02 Tables, rows, columns, types
+  03 PRIMARY KEY / FOREIGN KEY / constraints
+  04 SELECT (deep)
+  05 INSERT / UPDATE / DELETE
+  06 JOINs
+  07 Aggregations, GROUP BY, HAVING
+  08 Indexes (intro)
+  09 Transactions
+  10 CloudOps schema examples
+  11 Interview bank
+  12 Practice + done criteria
+
+
+================================================================================
+01. WHAT IS A RELATIONAL DATABASE?
+================================================================================
+
+Data lives in TABLES (relations).
+Each table has ROWS (records) and COLUMNS (fields).
+
+  users
+  +----+------------------+--------+
+  | id | email            | role   |
+  +----+------------------+--------+
+  | 1  | a@cloudops.local | admin  |
+  | 2  | b@cloudops.local | viewer |
+  +----+------------------+--------+
+
+SQL = Structured Query Language
+  SELECT — read
+  INSERT — create
+  UPDATE — change
+  DELETE — remove
+
+CloudOps stack:
+  FastAPI (Python) → SQLAlchemy → SQL → PostgreSQL
+
+
+================================================================================
+02. TABLES, ROWS, COLUMNS, TYPES (PostgreSQL)
+================================================================================
+
+Common types you'll use:
+
+  INTEGER / BIGINT     ids, counts
+  TEXT / VARCHAR(n)    email, name, role
+  BOOLEAN              active, verified
+  TIMESTAMPTZ          created_at (prefer with time zone)
+  UUID                 public ids / request ids
+  JSONB                flexible metadata/labels
+  NUMERIC              rare early; money-like values
+
+Example CREATE (conceptual — Alembic will manage later):
+
+  CREATE TABLE users (
+      id              BIGSERIAL PRIMARY KEY,
+      email           TEXT NOT NULL UNIQUE,
+      hashed_password TEXT NOT NULL,
+      role            TEXT NOT NULL DEFAULT 'viewer',
+      is_active       BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
+
+================================================================================
+03. KEYS & CONSTRAINTS
+================================================================================
+
+PRIMARY KEY (PK)
+  Uniquely identifies a row. Usually `id`.
+  Never null, always unique.
+
+FOREIGN KEY (FK)
+  Points to a PK in another table (relationship).
+
+  deployments.user_id → users.id
+  "this deployment belongs to that user"
+
+UNIQUE
+  email must be unique
+
+NOT NULL
+  column required
+
+DEFAULT
+  role DEFAULT 'viewer'
+
+CHECK (optional)
+  replicas >= 1
+
+WHY IT MATTERS
+  PK/FK keep data consistent.
+  Auth user delete may be blocked if deployments reference them (or cascade).
+
+
+INTERVIEW
+Q: PRIMARY KEY vs FOREIGN KEY?
+A: PK uniquely identifies a row in its table. FK references a PK in another
+   table to enforce relationships.
+
+
+================================================================================
+04. SELECT — READ DATA
+================================================================================
+
+Basic:
+  SELECT email, role FROM users;
+
+All columns:
+  SELECT * FROM users;          -- fine for learning; avoid * in production APIs
+
+Filter:
+  SELECT * FROM users WHERE role = 'admin';
+  SELECT * FROM users WHERE is_active = TRUE AND role = 'viewer';
+
+Compare:
+  = != <> < > <= >=
+  AND OR NOT
+  IN ('admin', 'operator')
+  LIKE 'a%@%'                   -- pattern (% = wildcard)
+  ILIKE 'A%@%'                  -- case-insensitive (Postgres)
+  IS NULL / IS NOT NULL         -- never use = NULL
+
+Sort / limit:
+  SELECT * FROM users ORDER BY created_at DESC;
+  SELECT * FROM users ORDER BY email ASC LIMIT 20 OFFSET 40;
+
+Alias:
+  SELECT u.email AS user_email FROM users AS u;
+
+DISTINCT:
+  SELECT DISTINCT role FROM users;
+
+CloudOps examples:
+  -- find user for login
+  SELECT id, email, hashed_password, role, is_active
+  FROM users
+  WHERE email = 'admin@cloudops.local';
+
+  -- list deployments for namespace
+  SELECT id, name, status, created_at
+  FROM deployments
+  WHERE namespace = 'prod'
+  ORDER BY created_at DESC
+  LIMIT 50;
+
+
+================================================================================
+05. INSERT / UPDATE / DELETE
+================================================================================
+
+INSERT (create):
+  INSERT INTO users (email, hashed_password, role)
+  VALUES ('a@cloudops.local', '<hash>', 'admin')
+  RETURNING id, email, role;
+
+Multiple rows:
+  INSERT INTO users (email, hashed_password, role) VALUES
+    ('a@x.com', 'h1', 'admin'),
+    ('b@x.com', 'h2', 'viewer');
+
+UPDATE (change):
+  UPDATE users
+  SET role = 'operator', is_active = TRUE
+  WHERE email = 'b@x.com'
+  RETURNING *;
+
+  -- DANGER: missing WHERE updates ALL rows
+  UPDATE users SET role = 'viewer';   -- NEVER do this by accident
+
+DELETE (remove):
+  DELETE FROM users WHERE id = 42 RETURNING id;
+
+  -- DANGER: DELETE FROM users;  wipes table
+
+UPSERT (Postgres ON CONFLICT) — useful for idempotent writes:
+  INSERT INTO users (email, hashed_password, role)
+  VALUES ('a@x.com', 'h', 'viewer')
+  ON CONFLICT (email) DO UPDATE
+  SET hashed_password = EXCLUDED.hashed_password
+  RETURNING *;
+
+
+CRUD mapping:
+  Create → INSERT
+  Read   → SELECT
+  Update → UPDATE
+  Delete → DELETE
+
+
+================================================================================
+06. JOINs — COMBINE TABLES
+================================================================================
+
+Assume:
+
+  users(id, email, role)
+  deployments(id, name, status, user_id)  -- user_id FK → users.id
+
+INNER JOIN
+  Only rows with a match on both sides.
+
+  SELECT u.email, d.name, d.status
+  FROM deployments d
+  INNER JOIN users u ON u.id = d.user_id;
+
+LEFT JOIN
+  All rows from left table; right side NULL if no match.
+
+  SELECT u.email, d.name
+  FROM users u
+  LEFT JOIN deployments d ON d.user_id = u.id;
+  -- users with zero deployments still appear
+
+RIGHT JOIN / FULL JOIN
+  Know they exist; LEFT/INNER cover most CloudOps queries.
+
+Multi-join sketch (audit):
+  SELECT u.email, a.action, a.created_at
+  FROM audit_logs a
+  JOIN users u ON u.id = a.user_id
+  WHERE a.action = 'deploy.create'
+  ORDER BY a.created_at DESC;
+
+
+Mental picture:
+
+  users          deployments
+  id|email       id|name|user_id
+  1 |a@x         10|web |1
+  2 |b@x         11|api |1
+
+  INNER JOIN on user_id=id → rows for a@x twice (two deploys), b@x absent if none
+
+
+INTERVIEW
+Q: INNER vs LEFT JOIN?
+A: INNER only matching pairs. LEFT keeps all left rows; missing right = NULL.
+
+
+================================================================================
+07. AGGREGATIONS, GROUP BY, HAVING
+================================================================================
+
+  SELECT role, COUNT(*) AS user_count
+  FROM users
+  GROUP BY role;
+
+  SELECT user_id, COUNT(*) AS deploy_count
+  FROM deployments
+  GROUP BY user_id
+  HAVING COUNT(*) >= 2;
+
+Common aggregates: COUNT SUM AVG MIN MAX
+
+CloudOps:
+  -- deployments by status
+  SELECT status, COUNT(*) FROM deployments GROUP BY status;
+
+
+================================================================================
+08. INDEXES (INTRO)
+================================================================================
+
+Index = lookup accelerator (like a book index).
+
+  CREATE INDEX idx_users_email ON users (email);
+  -- UNIQUE already creates an index on email if UNIQUE constraint exists
+
+Good candidates:
+  columns in WHERE / JOIN often (email, user_id, status)
+  foreign keys
+
+Tradeoff:
+  faster reads, slightly slower writes, uses disk
+
+Interview:
+  "We index users.email because login looks up by email constantly."
+
+
+================================================================================
+09. TRANSACTIONS
+================================================================================
+
+Transaction = all-or-nothing group of statements.
+
+  BEGIN;
+  UPDATE accounts ...;
+  INSERT INTO audit_logs ...;
+  COMMIT;
+  -- or ROLLBACK;
+
+ACID (high level):
+  Atomicity Consistency Isolation Durability
+
+CloudOps:
+  Creating a user + writing audit log should succeed together or fail together.
+  SQLAlchemy session.commit() / rollback() wraps this.
+
+
+================================================================================
+10. CLOUDOPS SCHEMA EXAMPLES (MENTAL MODEL)
+================================================================================
+
+users
+  id PK
+  email UNIQUE
+  hashed_password
+  role
+  is_active
+  created_at
+
+api_keys
+  id PK
+  user_id FK → users.id
+  key_hash
+  name
+  created_at
+  revoked_at
+
+deployments
+  id PK
+  user_id FK → users.id
+  name
+  image
+  namespace
+  status
+  created_at
+
+audit_logs
+  id PK
+  user_id FK → users.id
+  action
+  resource_type
+  resource_id
+  metadata JSONB
+  created_at
+
+Example queries you should be able to write by hand:
+  1) Get user by email
+  2) List active admins
+  3) Insert deployment for user 1
+  4) Update deployment status to 'failed'
+  5) Join users↔deployments for email + deploy name
+  6) Count deployments per status
+
+
+================================================================================
+11. INTERVIEW BANK — SQL
+================================================================================
+
+Q1. What is SQL?
+A. Language to query and modify relational databases.
+
+Q2. Table vs row vs column?
+A. Table=entity; row=record; column=attribute.
+
+Q3. SELECT purpose?
+A. Read rows matching criteria.
+
+Q4. WHERE vs HAVING?
+A. WHERE filters rows before grouping; HAVING filters groups after GROUP BY.
+
+Q5. PRIMARY KEY?
+A. Unique identifier for a row.
+
+Q6. FOREIGN KEY?
+A. Column referencing another table's PK; enforces relationships.
+
+Q7. UNIQUE vs PRIMARY KEY?
+A. Table has one PK; can have many UNIQUE constraints. PK also implies NOT NULL.
+
+Q8. NULL meaning?
+A. Unknown/missing. Use IS NULL, not = NULL.
+
+Q9. INSERT / UPDATE / DELETE?
+A. Create / modify / remove rows.
+
+Q10. Why RETURNING in Postgres?
+A. Get inserted/updated row back in one round trip (handy for APIs).
+
+Q11. INNER JOIN?
+A. Matches only.
+
+Q12. LEFT JOIN?
+A. All left + matches; NULLs when no match.
+
+Q13. What is normalization (basic)?
+A. Structure tables to reduce duplication (users separate from deployments).
+
+Q14. What is an index?
+A. Structure speeding lookups at write/storage cost.
+
+Q15. What is a transaction?
+A. Atomic unit of work — commit or rollback.
+
+Q16. DELETE vs TRUNCATE?
+A. DELETE row-wise (can WHERE, logged); TRUNCATE empties table fast (careful).
+
+Q17. How prevent accidental mass UPDATE?
+A. Always WHERE; test with SELECT first; use transactions.
+
+Q18. JSONB use in CloudOps?
+A. Flexible labels/metadata on audit events without constant migrations.
+
+Q19. Why not store plaintext passwords?
+A. Store password HASH only (bcrypt/argon2) — SQL column hashed_password.
+
+Q20. How does this map to SQLAlchemy?
+A. Model class ↔ table; instance ↔ row; session.execute/select ↔ SQL.
+
+
+================================================================================
+12. PRACTICE + DONE (WI-011)
+================================================================================
+
+[ ] Write SELECT with WHERE + ORDER BY + LIMIT
+[ ] INSERT a user RETURNING id
+[ ] UPDATE role by email
+[ ] DELETE by id
+[ ] INNER JOIN users↔deployments
+[ ] LEFT JOIN finding users with no deployments
+[ ] Explain PK vs FK out loud
+[ ] Explain index on email
+
+Playground: use Postgres in Docker (WI-023) or https://www.db-fiddle.com (Postgres)
+
+END OF SQL BASICS
+================================================================================
