@@ -946,3 +946,10 @@ If you want a **part 2**, I can walk through `rebase`, `reflog`, `cherry-pick`, 
 
 
 git switch -c feature-login
+git add .
+git commit -m "<message>"
+git push origin feature-login
+ Raise a Pull Request (PR)Open your web browser and navigate to your repository on GitHub.Click the yellow Compare & pull request banner that automatically appears at the top of the page.If the banner doesn't show: Click the Pull Requests tab, then click the green New Pull Request button.Set the base branch to the target (e.g., main or master) and the compare branch to your feature-branch-name.Write a title and description detailing your changes, then click Create pull request.5. Merge the Pull RequestOnce reviewers approve your changes (or if you are maintaining a personal repo), scroll to the bottom of the open PR page.Click the green Merge pull request button.Click Confirm merge.Click Delete branch on GitHub to keep the repository clean.6. Clean Up LocallySwitch back to your main branch locally and pull the newly merged changes so your local machine stays up to date:bashgit checkout main
+git pull origin main
+Use code with caution.If you'd like, let me know:
+
