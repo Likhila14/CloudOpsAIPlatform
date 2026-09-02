@@ -1,0 +1,1529 @@
+================================================================================
+CloudOps AI Platform — Python + HTTP Learning Guide (0 → Interview Ready)
+Covers: WI-009, WI-010, WI-223..WI-228, WI-231
+Style: same depth as Gitfrom0 — mental models first, then syntax, then interviews
+================================================================================
+
+You will understand Python and HTTP from first principles after this.
+Every later CloudOps piece (FastAPI auth, JWT, deploy APIs, workers, RAG)
+depends on these two foundations.
+
+Order of this document:
+  A. Why this matters for CloudOps
+  B. Python 0 → strong (types, functions, modules, packages, and beyond)
+  C. HTTP 0 → strong (methods, status, JSON, headers, REST)
+  D. How Python + HTTP map onto THIS project
+  E. Interview bank (every question you should be able to answer)
+
+
+================================================================================
+A. WHY THIS MATTERS FOR CLOUDOPS AI PLATFORM
+================================================================================
+
+Your platform is roughly:
+
+  Client / UI / curl / ChatGPT-style assistant
+            │
+            │  HTTP (JSON)
+            ▼
+     FastAPI services (Python)
+     - auth-service
+     - deploy / ops APIs
+     - AI / RAG / MCP tools
+            │
+            ▼
+     PostgreSQL, Redis, queues, K8s, Prometheus, Loki...
+
+So:
+  - Python = the language of your backend brains
+  - HTTP  = the wire protocol between everything
+
+If you cannot explain types, functions, modules, packages → you cannot
+explain FastAPI routes, Pydantic models, SQLAlchemy, or workers.
+
+If you cannot explain GET/POST, 401/404/500, JSON, headers → you cannot
+explain auth, deployments, health checks, or API design in interviews.
+
+
+================================================================================
+B. PYTHON — FROM ZERO TO STRONG
+================================================================================
+
+------------------------------------------------------------------------------
+B0. What is Python?
+------------------------------------------------------------------------------
+
+Python is a high-level, interpreted language.
+- You write .py files
+- The Python interpreter runs them
+- You do not compile to a .exe for normal web/API work
+
+In CloudOps you use Python 3.11+ because:
+- FastAPI / Pydantic / modern typing need it
+- Better performance and syntax than older 3.x
+
+Check:
+  python --version
+  pip --version
+
+
+------------------------------------------------------------------------------
+B1. Variables — names pointing to values
+------------------------------------------------------------------------------
+
+A variable is a name bound to an object in memory.
+
+  service = "auth-service"
+  port = 8000
+  healthy = True
+
+Think:
+
+  service ──────► "auth-service"
+  port     ──────► 8000
+  healthy  ──────► True
+
+Python is dynamically typed: the name can later point to another type.
+But for CloudOps APIs we ADD type hints so tools and teammates know intent.
+
+  port: int = 8000
+
+
+------------------------------------------------------------------------------
+B2. Core built-in types (memorize these)
+------------------------------------------------------------------------------
+
+1) str — text
+   email = "admin@cloudops.local"
+
+2) int — whole numbers
+   replicas = 3
+
+3) float — decimals
+   cpu_limit = 0.5
+
+4) bool — True / False
+   is_admin = True
+
+5) NoneType — absence of a value
+   token = None
+
+6) list — ordered, mutable sequence
+   services = ["auth", "deploy", "ai"]
+
+7) tuple — ordered, immutable sequence
+   point = (1, 2)
+   # good for fixed pairs: (status_code, body)
+
+8) dict — key → value map (JSON's best friend)
+   user = {"email": "a@b.com", "role": "admin"}
+
+9) set — unique unordered values
+   roles = {"admin", "viewer", "operator"}
+
+Check type anytime:
+  type(email)   # <class 'str'>
+  isinstance(replicas, int)  # True
+
+
+WHY THIS MATTERS IN CLOUDOPS
+---------------------------
+API bodies arrive as JSON → become Python dicts/lists.
+DB rows become Python objects (or dicts).
+Config is often dict / env strings converted to int/bool.
+Roles, statuses, namespaces are strings/enums.
+
+
+------------------------------------------------------------------------------
+B3. Type hints (you WILL use these everywhere in FastAPI)
+------------------------------------------------------------------------------
+
+Type hints do not change runtime behavior much by themselves.
+They document intent and enable FastAPI/Pydantic validation.
+
+  def get_user(user_id: int) -> dict[str, str]:
+      return {"id": str(user_id)}
+
+Common patterns for this project:
+
+  from typing import Optional, Any
+  # Python 3.10+: use X | None instead of Optional[X]
+
+  def find_user(email: str) -> dict | None:
+      ...
+
+  def create_token(payload: dict[str, Any]) -> str:
+      ...
+
+  roles: list[str] = ["admin", "viewer"]
+  meta: dict[str, int] = {"timeout": 30}
+
+Interview gold:
+  "Type hints help FastAPI generate OpenAPI docs and validate request data."
+
+
+------------------------------------------------------------------------------
+B4. Strings, f-strings, formatting
+------------------------------------------------------------------------------
+
+  name = "auth-service"
+  msg = f"Starting {name} on port {8000}"
+
+Useful methods:
+  email.lower().strip()
+  path.startswith("/api/")
+  "a,b,c".split(",")
+  "-".join(["a", "b", "c"])
+
+In logs / errors for CloudOps:
+  raise ValueError(f"Unknown role: {role}")
+
+
+------------------------------------------------------------------------------
+B5. Lists and dicts — deep dive (WI-223)
+------------------------------------------------------------------------------
+
+LISTS
+-----
+  pods = ["api-1", "api-2"]
+  pods.append("api-3")
+  pods[0]          # first
+  pods[-1]         # last
+  pods[1:3]        # slice
+  len(pods)
+  "api-1" in pods
+
+DICT
+----
+  deployment = {
+      "name": "web",
+      "replicas": 2,
+      "namespace": "prod",
+  }
+  deployment["replicas"]
+  deployment.get("image", "nginx:latest")  # default if missing
+  deployment["replicas"] = 3
+  list(deployment.keys())
+  list(deployment.values())
+  list(deployment.items())
+
+NESTING (very common in K8s-like JSON):
+  manifest = {
+      "metadata": {"name": "web", "labels": {"app": "web"}},
+      "spec": {"replicas": 2},
+  }
+  manifest["metadata"]["labels"]["app"]
+
+COMPREHENSIONS (muscle memory):
+  names = [s.upper() for s in services]
+  active = [p for p in pods if p.startswith("api")]
+  role_map = {u["email"]: u["role"] for u in users}
+
+
+------------------------------------------------------------------------------
+B6. Control flow
+------------------------------------------------------------------------------
+
+  if status == 200:
+      ...
+  elif status == 404:
+      ...
+  else:
+      ...
+
+  for service in services:
+      print(service)
+
+  for key, value in deployment.items():
+      print(key, value)
+
+  while retries > 0:
+      retries -= 1
+
+  match status:          # Python 3.10+
+      case 200 | 201:
+          ...
+      case 401 | 403:
+          ...
+      case _:
+          ...
+
+
+------------------------------------------------------------------------------
+B7. Functions — the heart of FastAPI endpoints (WI-009, WI-224)
+------------------------------------------------------------------------------
+
+A function is a reusable named block that takes inputs and may return an output.
+
+  def health() -> dict[str, str]:
+      return {"status": "ok"}
+
+PARAMETERS
+----------
+  # positional
+  def add(a: int, b: int) -> int:
+      return a + b
+
+  # defaults
+  def list_pods(namespace: str = "default") -> list[str]:
+      ...
+
+  # *args — variable positional
+  def log_lines(*lines: str) -> None:
+      for line in lines:
+          print(line)
+
+  # **kwargs — variable keyword
+  def build_headers(**kwargs: str) -> dict[str, str]:
+      return kwargs
+
+  # keyword-only (after *)
+  def deploy(name: str, *, replicas: int = 1) -> None:
+      ...
+
+RETURN
+------
+  return ends the function and sends a value back.
+  No return ⇒ returns None.
+
+FastAPI mapping (mental model):
+
+  @app.get("/health")
+  def health():
+      return {"status": "ok"}
+
+  # HTTP GET /health  →  Python calls health()  →  JSON response
+
+
+PASS BY OBJECT REFERENCE
+------------------------
+Python passes references to objects.
+Mutating a list/dict inside a function mutates the caller's object.
+Rebinding a name does not.
+
+  def bump(d: dict) -> None:
+      d["n"] = d.get("n", 0) + 1   # mutates caller's dict
+
+
+PURE VS SIDE-EFFECT FUNCTIONS
+-----------------------------
+  pure: same inputs → same output, no external change
+  side-effect: writes DB, sends HTTP, prints, mutates global
+
+API handlers often have side effects (DB writes). Prefer keeping
+business logic in clear functions you can unit test.
+
+
+------------------------------------------------------------------------------
+B8. Modules and packages (WI-009 — definition of done)
+------------------------------------------------------------------------------
+
+MODULE
+------
+A module is ONE .py file.
+
+  utils/hello.py
+
+  def say_hello(name: str) -> str:
+      return f"Hello, {name}"
+
+Import it:
+
+  from utils.hello import say_hello
+  # or
+  import utils.hello as hello
+
+PACKAGE
+-------
+A package is a FOLDER of modules, usually with __init__.py
+
+  auth_service/
+    app/
+      __init__.py
+      main.py
+      models.py
+      database.py
+      schemas.py
+      routers/
+        __init__.py
+        auth.py
+        users.py
+
+__init__.py can be empty. It marks the folder as a package
+(and can re-export public names).
+
+Relative vs absolute imports:
+  from app.models import User          # absolute (preferred in apps)
+  from .models import User             # relative within package
+
+WHY CLOUDOPS NEEDS THIS
+-----------------------
+You will NOT put everything in main.py.
+Real layout:
+
+  app/main.py          → create FastAPI app, include routers
+  app/models.py        → SQLAlchemy models
+  app/schemas.py       → Pydantic request/response models
+  app/database.py      → engine, SessionLocal, get_db
+  app/routers/auth.py  → /login, /register
+  app/services/...     → business logic
+  app/core/config.py   → settings from env
+
+Interview answer:
+  "A module is a file. A package is a directory of modules.
+   We split FastAPI apps into packages so routes, models, and DB stay maintainable."
+
+
+------------------------------------------------------------------------------
+B9. Classes, objects, dataclasses, enums (WI-225)
+------------------------------------------------------------------------------
+
+CLASS = blueprint
+OBJECT = instance created from the blueprint
+
+  class User:
+      def __init__(self, email: str, role: str) -> None:
+          self.email = email
+          self.role = role
+
+      def is_admin(self) -> bool:
+          return self.role == "admin"
+
+  u = User("a@b.com", "admin")
+  u.is_admin()
+
+DATACLASS — less boilerplate for data holders
+
+  from dataclasses import dataclass
+
+  @dataclass
+  class DeploymentRequest:
+      name: str
+      image: str
+      replicas: int = 1
+
+ENUM — fixed set of named values (roles, statuses)
+
+  from enum import Enum
+
+  class Role(str, Enum):
+      ADMIN = "admin"
+      VIEWER = "viewer"
+      OPERATOR = "operator"
+
+  class DeployStatus(str, Enum):
+      PENDING = "pending"
+      RUNNING = "running"
+      FAILED = "failed"
+      SUCCEEDED = "succeeded"
+
+In CloudOps auth: Role enum maps cleanly to RBAC.
+In deploy service: DeployStatus tracks job lifecycle.
+
+
+TWO "USER" IDEAS (classic interview trap)
+----------------------------------------
+Pydantic schema (API boundary):
+  class UserCreate(BaseModel):
+      email: str
+      password: str
+
+SQLAlchemy model (DB table):
+  class User(Base):
+      __tablename__ = "users"
+      id = Column(...)
+      email = Column(...)
+
+Same domain word, different jobs:
+  JSON → validate (Pydantic) → persist (SQLAlchemy) → DB
+
+
+------------------------------------------------------------------------------
+B10. Exceptions and custom errors (WI-226)
+------------------------------------------------------------------------------
+
+  try:
+      user = get_user(email)
+  except UserNotFoundError:
+      ...
+  finally:
+      db.close()
+
+Raise when something is wrong:
+  raise ValueError("replicas must be >= 1")
+
+Custom domain error:
+
+  class DomainError(Exception):
+      def __init__(self, message: str, code: str = "domain_error"):
+          self.message = message
+          self.code = code
+          super().__init__(message)
+
+  class NotFoundError(DomainError):
+      def __init__(self, message: str = "Not found"):
+          super().__init__(message, code="not_found")
+
+In FastAPI you map these to HTTP status codes:
+  NotFoundError → 404
+  AuthError → 401
+  ForbiddenError → 403
+  Validation issues → 422 (FastAPI/Pydantic default)
+
+
+WHEN TO CATCH
+-------------
+Catch when YOU can recover or translate to a clear API error.
+Do not blanket-catch Exception and hide bugs.
+Let unexpected errors become 500 and get logged.
+
+
+------------------------------------------------------------------------------
+B11. Context managers and `with` (sessions, files)
+------------------------------------------------------------------------------
+
+  with open("config.json") as f:
+      data = json.load(f)
+  # file closed automatically
+
+DB pattern conceptually:
+
+  with SessionLocal() as db:
+      ...
+
+FastAPI dependency often uses generator + yield:
+
+  def get_db():
+      db = SessionLocal()
+      try:
+          yield db
+      finally:
+          db.close()
+
+`yield` pauses; after the request finishes, finally runs.
+That is why Depends(get_db) is safe.
+
+
+------------------------------------------------------------------------------
+B12. Decorators (FastAPI is decorator-heavy)
+------------------------------------------------------------------------------
+
+A decorator wraps a function to add behavior.
+
+  def audit(fn):
+      def wrapper(*args, **kwargs):
+          print("calling", fn.__name__)
+          return fn(*args, **kwargs)
+      return wrapper
+
+  @audit
+  def delete_user(user_id: int) -> None:
+      ...
+
+FastAPI:
+
+  @app.post("/login")
+  def login(...):
+      ...
+
+Means: register this function as the handler for POST /login.
+
+Also used for: auth dependencies, caching, retries, timing.
+
+
+------------------------------------------------------------------------------
+B13. Generators and iterators (why `yield` appears)
+------------------------------------------------------------------------------
+
+  def countdown(n: int):
+      while n > 0:
+          yield n
+          n -= 1
+
+Generators produce values lazily.
+In FastAPI, yield in dependencies = setup/teardown around a request.
+
+
+------------------------------------------------------------------------------
+B14. Virtual environments + pip (WI-007, WI-227)
+------------------------------------------------------------------------------
+
+Problem: Project A needs FastAPI 0.100, Project B needs something else.
+Solution: isolated venv per project.
+
+  python -m venv .venv
+  # Windows
+  .venv\Scripts\activate
+  pip install fastapi uvicorn sqlalchemy pydantic
+  pip freeze > requirements.txt
+
+Recreate elsewhere:
+  python -m venv .venv
+  .venv\Scripts\activate
+  pip install -r requirements.txt
+
+Never commit .venv/
+Always commit requirements.txt (or pyproject.toml / lockfile later)
+
+Interview:
+  "A venv isolates dependencies so CloudOps auth-service packages
+   don't conflict with other projects on my machine."
+
+
+------------------------------------------------------------------------------
+B15. Important standard library for THIS project
+------------------------------------------------------------------------------
+
+  import os
+  os.getenv("DATABASE_URL")
+
+  import json
+  json.loads(text)   # str → dict
+  json.dumps(obj)    # dict → str
+
+  from datetime import datetime, timezone
+  datetime.now(timezone.utc)
+
+  import hashlib / from passlib...  # password hashing (auth)
+  import secrets                    # secure tokens / API keys
+  import uuid                       # request ids, resource ids
+  from pathlib import Path          # paths without string mess
+
+  import logging
+  logger = logging.getLogger(__name__)
+
+
+------------------------------------------------------------------------------
+B16. Async Python basics (WI-228)
+------------------------------------------------------------------------------
+
+FastAPI can run sync or async endpoints.
+
+  import asyncio
+  import httpx
+
+  async def fetch_status(url: str) -> int:
+      async with httpx.AsyncClient() as client:
+          r = await client.get(url)
+          return r.status_code
+
+  async def main():
+      code = await fetch_status("https://httpbin.org/get")
+      print(code)
+
+  asyncio.run(main())
+
+Mental model:
+  await = "pause this coroutine until the I/O finishes,
+           let the event loop run other work"
+
+Use async when waiting on network/DB I/O a lot.
+Don't pretend CPU-heavy work becomes faster just by adding async.
+
+
+------------------------------------------------------------------------------
+B17. pytest basics (you will test APIs)
+------------------------------------------------------------------------------
+
+  def add(a: int, b: int) -> int:
+      return a + b
+
+  def test_add():
+      assert add(2, 3) == 5
+
+For FastAPI: TestClient / httpx ASGI transport hits routes without real network.
+
+Interview:
+  "I write tests so refactors in auth or deploy don't silently break contracts."
+
+
+------------------------------------------------------------------------------
+B18. Python study checklist (do these hands-on)
+------------------------------------------------------------------------------
+
+[ ] Write utils/hello.py and import it from another file          (WI-009)
+[ ] Add type hints to 3 functions                                 (WI-009)
+[ ] 20 list/dict/comprehension drills in practice/                (WI-223)
+[ ] 10 typed functions with *args/**kwargs                        (WI-224)
+[ ] Rewrite a dict example as dataclass + enum                    (WI-225)
+[ ] Raise/catch custom DomainError                                (WI-226)
+[ ] Create venv, freeze, delete, recreate from requirements       (WI-227)
+[ ] async def + httpx call with asyncio.run                       (WI-228)
+
+
+================================================================================
+C. HTTP — FROM ZERO TO STRONG (WI-010, WI-231)
+================================================================================
+
+------------------------------------------------------------------------------
+C1. What is HTTP?
+------------------------------------------------------------------------------
+
+HTTP = HyperText Transfer Protocol.
+It is a request/response protocol between client and server.
+
+  Client (browser, curl, frontend, another service)
+      │
+      │  HTTP request
+      ▼
+  Server (your FastAPI auth-service)
+      │
+      │  HTTP response
+      ▼
+  Client
+
+CloudOps uses HTTP for:
+  - login / token issuance
+  - deploy triggers
+  - health checks
+  - metrics scrapes (Prometheus often HTTP)
+  - AI assistant tool calls to your APIs
+
+
+------------------------------------------------------------------------------
+C2. Anatomy of a request
+------------------------------------------------------------------------------
+
+  METHOD   PATH           HTTP_VERSION
+  POST     /api/v1/login  HTTP/1.1
+
+  Host: localhost:8000
+  Content-Type: application/json
+  Authorization: Bearer eyJ...
+
+  { "email": "a@b.com", "password": "secret" }
+
+Parts:
+  1. Method  — what kind of action
+  2. URL/path — which resource
+  3. Headers — metadata about the message
+  4. Body    — optional payload (often JSON)
+
+
+------------------------------------------------------------------------------
+C3. Anatomy of a response
+------------------------------------------------------------------------------
+
+  HTTP/1.1 200 OK
+  Content-Type: application/json
+
+  {"access_token":"...","token_type":"bearer"}
+
+Parts:
+  1. Status code — how it went
+  2. Headers
+  3. Body
+
+
+------------------------------------------------------------------------------
+C4. HTTP methods (memorize + when to use)
+------------------------------------------------------------------------------
+
+GET
+  Read / retrieve. Should not change server state.
+  Example: GET /health
+           GET /users/me
+           GET /deployments/42
+
+POST
+  Create a resource OR trigger an action.
+  Example: POST /auth/register
+           POST /auth/login
+           POST /deployments
+
+PUT
+  Replace a resource (full update). Idempotent ideal.
+  Example: PUT /users/5
+
+PATCH
+  Partial update.
+  Example: PATCH /deployments/5  {"replicas": 3}
+
+DELETE
+  Remove a resource.
+  Example: DELETE /api-keys/9
+
+HEAD / OPTIONS
+  Less common day-to-day; OPTIONS used in CORS preflight.
+
+CRUD mapping:
+
+  Create → POST
+  Read   → GET
+  Update → PUT / PATCH
+  Delete → DELETE
+
+Idempotent means: repeating the same request leaves the same result.
+  GET, PUT, DELETE are typically idempotent.
+  POST often is not (two POSTs may create two rows).
+
+
+------------------------------------------------------------------------------
+C5. Status codes (memorize these cold)
+------------------------------------------------------------------------------
+
+2xx SUCCESS
+  200 OK                 — success (read/update often)
+  201 Created            — resource created (POST register/deploy)
+  202 Accepted           — accepted for async processing (workers/queues)
+  204 No Content         — success, empty body (DELETE sometimes)
+
+3xx REDIRECT
+  301 / 302              — rarely your API's main concern early on
+
+4xx CLIENT ERROR
+  400 Bad Request        — malformed request
+  401 Unauthorized       — missing/invalid auth (not logged in)
+  403 Forbidden          — authenticated but not allowed (RBAC)
+  404 Not Found          — resource/route missing
+  409 Conflict           — e.g. email already registered
+  422 Unprocessable Entity — validation failed (FastAPI/Pydantic default)
+  429 Too Many Requests  — rate limited
+
+5xx SERVER ERROR
+  500 Internal Server Error — bug/crash/unhandled exception
+  502 Bad Gateway           — upstream failed (gateway/proxy)
+  503 Service Unavailable   — down/overloaded
+  504 Gateway Timeout
+
+CloudOps interview favorites:
+  401 vs 403
+  404 vs 400
+  201 vs 200
+  422 vs 400
+  202 for async deploy jobs
+
+
+------------------------------------------------------------------------------
+C6. Headers
+------------------------------------------------------------------------------
+
+Headers = metadata ABOUT the request/response, not the main business payload.
+
+Common request headers:
+  Content-Type: application/json
+  Accept: application/json
+  Authorization: Bearer <jwt>
+  X-Request-ID: <uuid>          # tracing
+  User-Agent: ...
+
+Common response headers:
+  Content-Type: application/json
+  Set-Cookie: ...               # if cookie sessions (you may use JWT instead)
+  Cache-Control: ...
+  WWW-Authenticate: Bearer      # auth challenge
+
+Auth mental model for CloudOps:
+
+  Authorization: Bearer eyJhbGciOi...
+       │
+       ▼
+  FastAPI dependency extracts token
+       │
+       ▼
+  Verify JWT signature + expiry
+       │
+       ▼
+  Load user / roles → allow or 401/403
+
+
+------------------------------------------------------------------------------
+C7. JSON
+------------------------------------------------------------------------------
+
+JSON = JavaScript Object Notation — language-agnostic data format.
+
+  {
+    "email": "admin@cloudops.local",
+    "role": "admin",
+    "active": true,
+    "replicas": 2,
+    "labels": {"app": "web"},
+    "ports": [80, 443]
+  }
+
+Mapping to Python:
+
+  JSON object {}  →  dict
+  JSON array  []  →  list
+  string          →  str
+  number          →  int or float
+  true/false      →  True/False
+  null            →  None
+
+In Python:
+  import json
+  obj = json.loads('{"a":1}')
+  text = json.dumps(obj)
+
+FastAPI usually does this for you via Pydantic models.
+
+
+------------------------------------------------------------------------------
+C8. URL pieces: path vs query vs body
+------------------------------------------------------------------------------
+
+  POST /api/v1/deployments?dry_run=true
+       \_________________/ \__________/
+            path              query
+
+  Body:
+  {"name":"web","image":"nginx:1.27","replicas":2}
+
+Path params identify a resource:
+  GET /deployments/{deployment_id}
+
+Query params filter/sort/flag:
+  GET /deployments?namespace=prod&limit=20
+
+Body carries structured create/update data.
+
+
+------------------------------------------------------------------------------
+C9. REST at a high level (WI-010 learn notes)
+------------------------------------------------------------------------------
+
+REST = style for designing HTTP APIs around resources.
+
+Prefer:
+  /users
+  /users/{id}
+  /deployments
+  /deployments/{id}/status
+
+Over RPC-ish:
+  /createUser
+  /doDeployNow
+
+Rules of thumb:
+  - nouns for resources
+  - methods for actions
+  - consistent status codes
+  - JSON in/out
+  - versioning often via /api/v1/...
+
+Your CloudOps platform exposes REST-ish FastAPI services first;
+later GraphQL/gRPC appear in later milestones — HTTP fundamentals still apply.
+
+
+------------------------------------------------------------------------------
+C10. curl practice (WI-231)
+------------------------------------------------------------------------------
+
+GET:
+  curl -i https://httpbin.org/get
+
+POST JSON:
+  curl -i https://httpbin.org/post ^
+    -H "Content-Type: application/json" ^
+    -d "{\"name\":\"web\",\"replicas\":2}"
+
+(-i shows response headers + status)
+
+Later against your auth-service:
+  curl -i http://localhost:8000/health
+  curl -i http://localhost:8000/auth/login ^
+    -H "Content-Type: application/json" ^
+    -d "{\"email\":\"a@b.com\",\"password\":\"secret\"}"
+
+
+------------------------------------------------------------------------------
+C11. HTTPS note
+------------------------------------------------------------------------------
+
+HTTPS = HTTP + TLS encryption.
+Same methods/status/JSON; the transport is encrypted.
+In production CloudOps on AWS/K8s you terminate TLS at load balancer/ingress.
+
+
+================================================================================
+D. PYTHON + HTTP → THIS PROJECT (mental model glue)
+================================================================================
+
+Example: login
+
+  curl POST /auth/login + JSON email/password
+            │
+            ▼
+  FastAPI route (Python function)
+            │
+            ▼
+  Pydantic schema validates types
+            │
+            ▼
+  SQLAlchemy User model lookup (Python class ↔ DB row)
+            │
+            ▼
+  verify password hash (Python)
+            │
+            ▼
+  create JWT string (Python)
+            │
+            ▼
+  HTTP 200 + JSON {"access_token": "..."}
+            │
+            ▼
+  later requests send Authorization header
+
+Example: deploy (async flavor)
+
+  POST /deployments → 202 Accepted + job id
+  worker (Python) processes queue
+  GET /deployments/{id} → status JSON
+  failures → 4xx/5xx with structured error body
+
+Example: health for K8s probes
+
+  GET /health → 200 {"status":"ok"}
+  if DB down → 503
+
+
+Package layout you should be able to draw on a whiteboard:
+
+  services/auth-service/
+    app/
+      main.py
+      core/config.py
+      db/session.py
+      models/user.py
+      schemas/auth.py
+      api/routes/auth.py
+      services/auth_service.py
+    tests/
+    requirements.txt
+    Dockerfile
+
+
+================================================================================
+E. INTERVIEW QUESTION BANK
+================================================================================
+Format: Q → strong answer (CloudOps-aware).
+Aim to answer out loud without notes.
+
+
+------------------------------------------------------------------------------
+E1. Python — types & data model
+------------------------------------------------------------------------------
+
+Q1. What are Python's basic built-in types?
+A: int, float, bool, str, list, tuple, dict, set, NoneType. Bytes also common.
+
+Q2. Difference between list and tuple?
+A: List is mutable; tuple is immutable. Use tuple for fixed records; list for
+   growing collections like pods or services.
+
+Q3. Difference between list and set?
+A: Set stores unique unordered items; list keeps order and allows duplicates.
+   Roles/permissions often modeled with sets for membership tests.
+
+Q4. What is a dict and why do APIs love it?
+A: Key-value map. JSON objects deserialize to dicts. Perfect for configs,
+   request payloads, and response bodies.
+
+Q5. What does None mean?
+A: No value. Common return when user not found (or use exceptions instead).
+
+Q6. What is dynamic typing?
+A: Types are attached to objects at runtime; variables are names bound to objects.
+   `x = 1` then `x = "a"` is allowed unless tooling/type-checkers forbid it.
+
+Q7. What are type hints? Do they enforce types at runtime?
+A: Annotations documenting expected types. By themselves they don't enforce;
+   FastAPI/Pydantic and type-checkers use them. Enforcement at API boundary
+   comes from Pydantic validation.
+
+Q8. list[str] vs List[str]?
+A: In 3.9+ built-in generics work: list[str]. Older code imports List from typing.
+
+Q9. What is Optional[str] or str | None?
+A: Value may be str or None. Example: optional Authorization header.
+
+Q10. Mutable vs immutable types?
+A: Immutable: int, float, str, tuple, frozenset. Mutable: list, dict, set.
+   Mutability affects bugs when sharing objects across functions.
+
+Q11. What is truthiness in Python?
+A: Empty list/dict/str, 0, None are falsy. Useful in `if user:` checks —
+   but be careful: empty list is falsy even if "valid".
+
+Q12. == vs is?
+A: == compares values; is compares object identity. Use `is None`, not == None.
+
+Q13. What is hashing? Which types can be dict keys?
+A: Dict keys must be hashable (immutable). str/int/tuple-of-immutables OK;
+   list/dict not valid keys.
+
+
+------------------------------------------------------------------------------
+E2. Python — functions
+------------------------------------------------------------------------------
+
+Q14. What is a function?
+A: Named reusable block of code with parameters and optional return value.
+   FastAPI endpoints are functions.
+
+Q15. What are *args and **kwargs?
+A: *args collects extra positional args as a tuple; **kwargs collects extra
+   keyword args as a dict. Useful for wrappers/decorators.
+
+Q16. What is a default argument pitfall?
+A: Never use mutable defaults like def f(items=[]): — the list is shared.
+   Use items: list | None = None then create inside.
+
+Q17. Pass-by-value or pass-by-reference?
+A: Pass-by-object-reference. Rebinding local name ≠ mutating shared object.
+
+Q18. What does return None mean vs omit return?
+A: Same result — function returns None.
+
+Q19. What is a pure function and why test them?
+A: No side effects; deterministic. Business rules (RBAC checks, validation)
+   should be pure and unit-tested.
+
+Q20. Keyword-only arguments?
+A: After * in signature: def deploy(name, *, replicas=1). Forces clarity at call site.
+
+Q21. What is a lambda?
+A: Anonymous one-expression function. Prefer named defs for readability in services.
+
+Q22. First-class functions?
+A: Functions are objects — can be passed, returned, stored. Decorators rely on this.
+
+
+------------------------------------------------------------------------------
+E3. Modules, packages, project structure
+------------------------------------------------------------------------------
+
+Q23. Module vs package?
+A: Module = .py file. Package = directory with modules (typically __init__.py).
+
+Q24. What does __init__.py do?
+A: Marks a package; may run package init or re-export public API.
+
+Q25. Absolute vs relative import?
+A: Absolute: from app.models import User. Relative: from .models import User.
+   Prefer absolute in application code for clarity.
+
+Q26. What is __name__ == "__main__"?
+A: True when file is executed directly, not when imported. Use to run scripts/demo.
+
+Q27. Why split FastAPI into routers/schemas/models?
+A: Separation of concerns: HTTP layer, validation layer, persistence layer.
+   Easier tests, clearer ownership, smaller PRs.
+
+Q28. What should go in requirements.txt?
+A: Pinned dependencies to recreate the venv. Not the venv folder itself.
+
+Q29. What is a namespace in Python?
+A: A mapping of names to objects — module namespaces avoid collisions
+   (app.models.User vs app.schemas.User).
+
+
+------------------------------------------------------------------------------
+E4. OOP / dataclasses / enums
+------------------------------------------------------------------------------
+
+Q30. Class vs object?
+A: Class is blueprint; object is instance. User class → specific user object.
+
+Q31. What is self?
+A: Reference to the instance the method is called on.
+
+Q32. What is __init__?
+A: Initializer setting up instance attributes after creation.
+
+Q33. Inheritance vs composition?
+A: Inheritance = is-a. Composition = has-a. Prefer composition for services
+   (AuthService has a repository), inheritance for exception hierarchies.
+
+Q34. Why dataclasses?
+A: Auto-generate init/repr for data containers like DeploymentRequest.
+
+Q35. Why enums for roles/statuses?
+A: Prevents magic strings, enables exhaustive handling, clearer APIs/OpenAPI.
+
+Q36. Pydantic model vs SQLAlchemy model — difference?
+A: Pydantic validates API I/O. SQLAlchemy maps to DB tables. Don't mix jobs.
+
+Q37. What is encapsulation?
+A: Hide internals behind methods/properties. e.g. user.check_password()
+   instead of comparing hashes ad hoc everywhere.
+
+
+------------------------------------------------------------------------------
+E5. Exceptions, control, resources
+------------------------------------------------------------------------------
+
+Q38. try/except/finally purpose?
+A: Handle expected failures; finally always runs for cleanup (close DB/file).
+
+Q39. When custom exceptions?
+A: Domain errors you want to translate to stable HTTP codes/messages.
+
+Q40. Bare except: bad?
+A: Yes — catches KeyboardInterrupt etc., hides bugs. Catch specific types.
+
+Q41. Context manager benefits?
+A: Guaranteed setup/teardown via with. Safer than manual close.
+
+Q42. How does get_db with yield work?
+A: Generator dependency: create session, yield to endpoint, close after response.
+
+
+------------------------------------------------------------------------------
+E6. Decorators, generators, async
+------------------------------------------------------------------------------
+
+Q43. What is a decorator?
+A: Function wrapping another to add behavior. @app.get is registration.
+
+Q44. Why are FastAPI routes decorated?
+A: To bind HTTP method+path to the Python callable and attach metadata.
+
+Q45. What does yield do?
+A: Produces a generator value and pauses. Used in streaming and DI teardown.
+
+Q46. async def vs def in FastAPI?
+A: async for non-blocking I/O endpoints; sync OK too (runs in threadpool).
+   Don't call blocking I/O inside async without care.
+
+Q47. What does await mean?
+A: Wait for an awaitable (coroutine/IO) without blocking the event loop.
+
+Q48. What is the event loop?
+A: Scheduler running coroutines cooperatively for concurrent I/O.
+
+
+------------------------------------------------------------------------------
+E7. venv, pip, tooling
+------------------------------------------------------------------------------
+
+Q49. Why virtual environments?
+A: Isolate dependencies per project; reproducible CloudOps services.
+
+Q50. pip freeze vs manually written requirements?
+A: freeze captures exact installed versions. Manual may be cleaner but riskier.
+   Teams often use pinned locks.
+
+Q51. Difference between installing a package and importing a module?
+A: pip install puts distribution into environment; import loads a module
+   from sys.path at runtime.
+
+Q52. What is PYTHONPATH / why import errors happen?
+A: Python searches sys.path. Wrong cwd/package layout → ModuleNotFoundError.
+
+
+------------------------------------------------------------------------------
+E8. HTTP fundamentals
+------------------------------------------------------------------------------
+
+Q53. What is HTTP?
+A: Application protocol for request/response between client and server.
+
+Q54. Difference between HTTP and HTTPS?
+A: HTTPS adds TLS encryption/authentication of the connection.
+
+Q55. Parts of an HTTP request?
+A: Method, URL, headers, optional body.
+
+Q56. Parts of an HTTP response?
+A: Status line/code, headers, optional body.
+
+Q57. When GET vs POST?
+A: GET retrieve without side effects; POST create/trigger with body.
+
+Q58. PUT vs PATCH?
+A: PUT replace whole resource; PATCH partial update.
+
+Q59. Is POST idempotent?
+A: Not generally. Two identical POSTs may create two resources.
+
+Q60. What is a resource in REST?
+A: A noun-like entity identified by URL: /users/1, /deployments/5.
+
+Q61. Path param vs query param?
+A: Path identifies resource; query filters/options.
+
+Q62. What is Content-Type?
+A: Header declaring body format, e.g. application/json.
+
+Q63. What does Authorization: Bearer mean?
+A: Client sends an access token (often JWT) proving identity.
+
+Q64. Why JSON for APIs?
+A: Simple, language-agnostic, native to browsers and FastAPI/Pydantic.
+
+
+------------------------------------------------------------------------------
+E9. Status codes (interview favorites)
+------------------------------------------------------------------------------
+
+Q65. 200 vs 201?
+A: 200 OK general success; 201 Created when a new resource was created.
+
+Q66. 202 Accepted?
+A: Request accepted for async processing — perfect for deploy jobs.
+
+Q67. 400 vs 422?
+A: 400 malformed/bad request broadly; 422 semantic validation failure
+   (FastAPI default for Pydantic errors).
+
+Q68. 401 vs 403?
+A: 401 not authenticated (who are you?). 403 authenticated but not allowed
+   (you can't do this). Critical for RBAC in CloudOps.
+
+Q69. 404 meaning?
+A: Resource or route not found.
+
+Q70. 409 Conflict example?
+A: Registering an email that already exists.
+
+Q71. 429?
+A: Rate limit exceeded — protect login/deploy endpoints.
+
+Q72. 500 vs 503?
+A: 500 unexpected server bug; 503 temporarily unavailable (dependency down).
+
+Q73. What status for successful DELETE?
+A: 200 with body or 204 no content — be consistent.
+
+Q74. Why shouldn't you return 200 for everything?
+A: Clients, gateways, monitors rely on codes. Hiding errors breaks observability.
+
+
+------------------------------------------------------------------------------
+E10. CloudOps-project scenario questions
+------------------------------------------------------------------------------
+
+Q75. How would you design POST /auth/login responses?
+A: 200 + tokens on success; 401 on bad credentials; 422 on bad schema;
+   429 if rate limited. Never reveal whether email exists if security requires.
+
+Q76. How does a protected route work end-to-end?
+A: Client sends Bearer JWT → dependency validates → loads user/roles →
+   endpoint runs or returns 401/403.
+
+Q77. Why /health returns 200?
+A: Orchestrators (Docker/K8s) probe liveness/readiness over HTTP.
+
+Q78. When would deploy API return 202?
+A: When work is queued to a worker; client polls status endpoint.
+
+Q79. How do Python types show up in OpenAPI?
+A: FastAPI reads type hints/Pydantic models to generate /docs schemas.
+
+Q80. Why env vars for DATABASE_URL instead of hardcoding?
+A: Secrets/config differ per environment; don't commit passwords.
+
+Q81. Map RBAC denial to HTTP.
+A: Authenticated viewer trying admin action → 403 Forbidden.
+
+Q82. Missing token on protected route?
+A: 401 Unauthorized.
+
+Q83. Invalid JSON body to FastAPI?
+A: Typically 422 Unprocessable Entity with validation details.
+
+Q84. Unhandled exception in endpoint?
+A: 500; should be logged with request id for observability.
+
+Q85. Why separate schemas and models in auth-service?
+A: API contract vs DB schema evolve differently; password hash never returned
+   in response schema.
+
+Q86. How would you model Role in Python?
+A: str Enum: admin/viewer/operator — validated by Pydantic, stored in DB.
+
+Q87. What Python structure stores JSON labels {"app":"web"}?
+A: dict[str, str] (or JSON column / ORM mapped dict).
+
+Q88. How do you safely close DB sessions in FastAPI?
+A: Dependency with yield + finally close; or context-managed session.
+
+Q89. Why not put all code in main.py?
+A: Unmaintainable; hard to test; merge conflicts; unclear boundaries.
+
+Q90. How do microservices in CloudOps talk?
+A: Primarily HTTP/JSON (later gRPC). Same method/status/header fundamentals.
+
+
+------------------------------------------------------------------------------
+E11. Debugging / practical "what went wrong?"
+------------------------------------------------------------------------------
+
+Q91. You get 404 on /produucts — what happened?
+A: Path typo; route not registered; wrong prefix (/api/v1).
+
+Q92. You get 500 on create user — first checks?
+A: Server logs/traceback; DB up?; session misuse?; integrity error?;
+   wrong object type passed to ORM?
+
+Q93. curl works but browser fails — ideas?
+A: CORS headers; preflight OPTIONS; auth cookies vs bearer; mixed content.
+
+Q94. Status 401 after login worked — ideas?
+A: Token not sent; wrong header format; expired JWT; bad secret/audience.
+
+Q95. 403 after valid login — ideas?
+A: Role insufficient; resource ownership check failed.
+
+Q96. JSON parse errors?
+A: Body not valid JSON; wrong Content-Type; trailing commas.
+
+
+------------------------------------------------------------------------------
+E12. Advanced / senior-leaning Python for this stack
+------------------------------------------------------------------------------
+
+Q97. What is GIL? Does it matter for FastAPI?
+A: Global Interpreter Lock limits CPU-parallel threads in CPython.
+   FastAPI still shines at concurrent I/O; CPU-heavy work → processes/workers.
+
+Q98. deepcopy vs shallow copy?
+A: Shallow copies top-level only; nested mutables shared. Important when
+   cloning manifests/configs.
+
+Q99. What are dunder methods?
+A: Special methods like __init__, __repr__, __eq__. Customize object behavior.
+
+Q100. How do you make an object usable in `with`?
+A: Implement __enter__/__exit__ or use contextlib.contextmanager.
+
+Q101. What is monkey patching? Good idea?
+A: Replacing attributes at runtime — useful in tests, dangerous in prod.
+
+Q102. slots / memory tuning — needed early?
+A: Rarely for your stage; know it exists for many small objects.
+
+Q103. What is structural pattern matching?
+A: match/case — elegant for status/command handling in workers.
+
+Q104. How would you type a JSON-like dict?
+A: dict[str, Any] loosely; TypedDict/Pydantic for structure.
+
+Q105. pydantic BaseModel vs dataclass?
+A: BaseModel validates/coerces/serializes for APIs; dataclass is lighter
+   in-process data. Prefer Pydantic at HTTP boundaries.
+
+
+------------------------------------------------------------------------------
+E13. Security-flavored HTTP/Python (auth milestone)
+------------------------------------------------------------------------------
+
+Q106. Why hash passwords (never store plaintext)?
+A: DB leak shouldn't reveal usable passwords. Use strong password hashing.
+
+Q107. Why JWT in Authorization header?
+A: Stateless auth for APIs; scalable across services.
+
+Q108. What belongs in JWT claims vs DB lookup?
+A: sub/user id, exp, roles maybe; sensitive/frequently changing data in DB.
+
+Q109. What is CORS?
+A: Browser security: which frontends may call your API. Configured via headers.
+
+Q110. Why request IDs in headers/logs?
+A: Correlate a single HTTP request across services (observability milestone).
+
+
+------------------------------------------------------------------------------
+E14. Quick-fire definitions (say in one breath)
+------------------------------------------------------------------------------
+
+Q111. Module?  — A Python file you can import.
+Q112. Package? — A directory of modules.
+Q113. Endpoint? — HTTP method + path handled by a function.
+Q114. Schema? — Shape/validation of data (often Pydantic).
+Q115. ORM? — Maps classes to DB tables (SQLAlchemy).
+Q116. Idempotent? — Repeat request → same effect.
+Q117. Stateless HTTP auth via JWT? — Each request carries token; server verifies.
+Q118. RBAC? — Permissions by role (admin/viewer/operator).
+Q119. Health check? — Cheap HTTP GET for orchestration.
+Q120. OpenAPI? — Machine-readable API contract; FastAPI generates it.
+
+
+------------------------------------------------------------------------------
+E15. Whiteboard challenges (practice aloud)
+------------------------------------------------------------------------------
+
+W1. Draw request lifecycle for POST /auth/register.
+W2. Write a typed function is_allowed(role: Role, action: str) -> bool.
+W3. Sketch package tree for auth-service.
+W4. Given JSON deployment manifest, show dict access to replicas and labels.
+W5. Map these outcomes to status codes:
+      - bad password
+      - viewer deletes cluster
+      - missing deployment id
+      - deploy queued
+      - free disk crash inside handler
+W6. Explain why this is wrong:
+      db.add(pydantic_object)
+W7. Write curl for login and for calling a protected route with Bearer token.
+W8. Explain venv + requirements recreate on a fresh laptop.
+
+
+================================================================================
+F. ONE-PAGE CHEAT SHEET
+================================================================================
+
+PYTHON
+  types: str int float bool None list tuple dict set
+  hints: def f(x: int) -> str
+  module = file | package = folder
+  dataclass/enum for domain values
+  raise DomainError → map to HTTP
+  venv + pip freeze for reproducibility
+  async/await for I/O concurrency
+
+HTTP
+  GET read | POST create/action | PUT replace | PATCH patch | DELETE remove
+  200 OK | 201 created | 202 accepted | 204 no content
+  400 bad | 401 authn | 403 authz | 404 missing | 409 conflict | 422 validate | 429 limit
+  500 bug | 503 unavailable
+  JSON body ↔ Python dict/list
+  Authorization: Bearer <token>
+  Content-Type: application/json
+
+CLOUDOPS GLUE
+  HTTP JSON → FastAPI function → Pydantic validate → service logic → SQLAlchemy → DB
+  Errors → correct status codes
+  Packages keep auth/deploy/ai services maintainable
+
+
+================================================================================
+G. DONE CRITERIA (WI-009 + WI-010)
+================================================================================
+
+WI-009 done when you can:
+  [ ] Write a module and import it
+  [ ] Use type hints
+  [ ] Explain module vs package / __init__.py
+
+WI-010 done when you can:
+  [ ] Explain request vs response
+  [ ] Know when POST vs GET
+  [ ] Memorize 200, 201, 400, 401, 403, 404, 500
+  [ ] Explain REST at high level
+
+Interview-ready when you can answer section E out loud with CloudOps examples.
+
+
+================================================================================
+H. NEXT AFTER THIS DOCUMENT
+================================================================================
+
+1. Hands-on practice/ folder exercises (WI-223..228, WI-231)
+2. SQL basics (WI-011)
+3. FastAPI overview (WI-021) → scaffold auth-service (WI-022)
+4. Keep using this file as flashcards for section E
+
+Remember the spine of everything you will build:
+
+  HTTP request → Python function → validated data → side effects → HTTP response
+
+Once that is automatic, auth, deploy, observability, and AI assistants
+are "just" more Python modules speaking HTTP.
+
+
+END OF NOTES
+================================================================================

@@ -1,0 +1,1738 @@
+================================================================================
+CloudOps AI Platform — PYTHON BASICS (0 → 1,000,000,000)
+Complete language foundation: topics + examples + interview bank
+Companion to: docs/Learnings/PythonHTTP/notes.txt  |  Gitfrom0/notes.txt
+Covers: WI-009, WI-223, WI-224, WI-225, WI-226, WI-227, WI-228 (+ deeper)
+================================================================================
+
+Goal of this file:
+  Learn Python so well that FastAPI, SQLAlchemy, workers, RAG, and interviews
+  feel like "just using Python" — not magic syntax.
+
+How to study:
+  1. Read a section
+  2. Type every example yourself (do not only read)
+  3. Answer the interview Qs for that section OUT LOUD
+  4. Connect each idea to CloudOps (auth / deploy / AI) when noted
+
+Order:
+  00  Setup & how Python runs
+  01  Variables & memory mental model
+  02  Numbers, bools, None
+  03  Strings
+  04  Lists
+  05  Tuples
+  06  Dicts
+  07  Sets
+  08  Operators & comparisons
+  09  Control flow (if / for / while / match)
+  10  Functions (deep)
+  11  Scope, LEGB, globals
+  12  Comprehensions & generators basics
+  13  Type hints (project-critical)
+  14  Modules & packages
+  15  Files, pathlib, json, os.env
+  16  Exceptions
+  17  Classes & OOP
+  18  Dataclasses & enums
+  19  Decorators
+  20  Context managers
+  21  Iterators & generators (yield)
+  22  Virtualenv & pip
+  23  Logging & debugging mindset
+  24  Async basics
+  25  Stdlib cheat sheet for CloudOps
+  26  Idioms & pitfalls
+  27  How Python maps to THIS project
+  28  Mega interview bank (200+)
+  29  Practice drills
+  30  Done criteria
+
+
+================================================================================
+00. SETUP — HOW PYTHON RUNS
+================================================================================
+
+Python is an interpreted language. You write .py files; the interpreter runs them.
+
+  python --version          # need 3.11+
+  python -c "print('hi')"   # one-liner
+  python hello.py           # run a file
+
+REPL (interactive):
+  python
+  >>> 1 + 1
+  2
+
+.pyc / __pycache__:
+  Python caches bytecode. Safe to ignore; don't commit it (.gitignore).
+
+CloudOps note:
+  Every service (auth-service, workers) is "Python process runs my package".
+
+
+INTERVIEW
+Q: Interpreted vs compiled?
+A: Python compiles to bytecode then interprets on a VM (CPython). You usually
+   don't ship a binary; you ship source + deps (or a container image).
+
+
+================================================================================
+01. VARIABLES & MEMORY MENTAL MODEL
+================================================================================
+
+A variable is a NAME bound to an OBJECT.
+
+  service = "auth-service"
+  port = 8000
+
+Think:
+
+  name "service" ──────► object "auth-service" (str)
+  name "port"    ──────► object 8000 (int)
+
+Rebinding:
+  port = 8001          # name now points to a different object
+
+Multiple names, same object:
+  a = [1, 2]
+  b = a
+  b.append(3)
+  # a is also [1, 2, 3]  — same list object
+
+Identity vs equality:
+  a == b     # same value?
+  a is b     # same object in memory?
+  x is None  # correct None check
+
+CloudOps note:
+  Request payload dicts are objects. Mutating them in a helper mutates the
+  caller's data unless you copy.
+
+
+INTERVIEW
+Q: == vs is?
+A: == value equality; is identity. Always `is None` / `is not None`.
+
+
+================================================================================
+02. NUMBERS, BOOLS, NONE
+================================================================================
+
+INT
+---
+  replicas = 3
+  big = 10_000_000      # underscores OK for readability
+
+FLOAT
+-----
+  cpu = 0.5
+  # floats are approximate; for money use Decimal (rare in early CloudOps)
+
+BOOL
+----
+  healthy = True
+  ready = False
+  # True/False are capitalized
+
+NONE
+----
+  token = None          # "no value yet"
+
+Conversions:
+  int("42") -> 42
+  str(42) -> "42"
+  float("3.14") -> 3.14
+  bool(0) -> False
+  bool(1) -> True
+  bool("") -> False
+  bool("x") -> True
+
+Truthiness (falsy values):
+  False, None, 0, 0.0, "", [], {}, set(), ()
+
+EXAMPLE — parse env with defaults:
+
+  import os
+  port = int(os.getenv("PORT", "8000"))
+  debug = os.getenv("DEBUG", "false").lower() == "true"
+
+
+INTERVIEW
+Q: Why is bool a subclass of int?
+A: Historically True==1, False==0. Don't rely on that in APIs; use real bools.
+
+
+================================================================================
+03. STRINGS (str)
+================================================================================
+
+  email = "admin@cloudops.local"
+  role = 'admin'                 # single or double quotes
+  multi = """line1
+  line2"""
+
+F-STRINGS (use these always):
+  name = "auth-service"
+  msg = f"starting {name} on {8000}"
+
+Useful methods:
+  s.lower(), s.upper(), s.strip()
+  s.startswith("/api/")
+  s.endswith(".json")
+  s.replace("old", "new")
+  s.split(",")                   # str -> list
+  ",".join(["a", "b"])           # list -> str
+  s.find("x"), s.index("x")
+  len(s)
+
+Indexing / slicing:
+  s = "cloudops"
+  s[0]      # 'c'
+  s[-1]     # 's'
+  s[0:5]    # 'cloud'
+  s[::-1]   # reverse
+
+Immutability:
+  s[0] = "C"   # TypeError — strings cannot be changed in place
+  s = "C" + s[1:]
+
+Formatting for logs/errors:
+  raise ValueError(f"unknown role: {role!r}")
+
+RAW / PATHS:
+  Prefer pathlib over raw Windows path strings.
+
+
+EXAMPLES FOR CLOUDOPS
+
+  path = "/api/v1/users/42"
+  if path.startswith("/api/v1/"):
+      ...
+
+  header = "Bearer eyJabc.def"
+  scheme, _, token = header.partition(" ")
+  # scheme == "Bearer", token == "eyJabc.def"
+
+
+INTERVIEW
+Q: Are strings mutable?
+A: No. Any "change" creates a new string object.
+
+Q: f-string vs format vs %?
+A: Prefer f-strings in modern Python (3.6+). Clear and fast.
+
+
+================================================================================
+04. LISTS
+================================================================================
+
+Ordered, mutable sequence.
+
+  services = ["auth", "deploy", "ai"]
+  services.append("worker")
+  services.extend(["metrics", "logs"])
+  services.insert(0, "gateway")
+  services.pop()                 # remove last
+  services.remove("ai")          # remove by value
+  services[0] = "auth-service"   # mutate
+  len(services)
+  "auth" in services
+
+Slicing:
+  services[1:3]
+  services[:]                    # shallow copy
+
+Sort:
+  nums = [3, 1, 2]
+  nums.sort()                    # in place
+  sorted(nums)                   # new list
+
+Nested (like simplified manifests):
+  pods = [
+      {"name": "api-1", "ready": True},
+      {"name": "api-2", "ready": False},
+  ]
+  ready_names = [p["name"] for p in pods if p["ready"]]
+
+
+Copy pitfall:
+  a = [1, 2]
+  b = a          # same object
+  c = a.copy()   # shallow copy
+  d = list(a)    # shallow copy
+  import copy
+  e = copy.deepcopy(a)
+
+
+INTERVIEW
+Q: list.append vs list.extend?
+A: append adds one element; extend adds each element from an iterable.
+
+Q: How to copy a list?
+A: a.copy(), list(a), or a[:] — shallow. Nested structures need deepcopy.
+
+
+================================================================================
+05. TUPLES
+================================================================================
+
+Ordered, immutable sequence.
+
+  point = (10, 20)
+  single = (10,)          # comma required for 1-element tuple
+  x, y = point            # unpacking
+
+Why use tuples?
+  - Fixed records: (status_code, body)
+  - Dict keys (if contents hashable)
+  - Return multiple values: return token, expires_at
+
+  def divide(a: int, b: int) -> tuple[int, int]:
+      return a // b, a % b
+
+  q, r = divide(10, 3)
+
+
+INTERVIEW
+Q: Tuple vs list?
+A: Tuple immutable + often means "fixed structure"; list means "collection that grows".
+
+
+================================================================================
+06. DICTS (most important collection for APIs)
+================================================================================
+
+Key → value map. JSON objects become dicts.
+
+  user = {
+      "email": "a@b.com",
+      "role": "admin",
+      "active": True,
+  }
+
+Access:
+  user["email"]
+  user.get("phone")              # None if missing
+  user.get("phone", "n/a")       # default
+  user["role"] = "viewer"
+  del user["active"]
+  "email" in user                # key membership
+
+Iterate:
+  for key in user:
+      ...
+  for key, value in user.items():
+      ...
+  user.keys(); user.values()
+
+Merge (3.9+):
+  a = {"x": 1}
+  b = {"y": 2}
+  c = a | b
+
+Nested dict (K8s-like):
+  manifest = {
+      "metadata": {
+          "name": "web",
+          "labels": {"app": "web", "env": "prod"},
+      },
+      "spec": {"replicas": 2},
+  }
+  replicas = manifest["spec"]["replicas"]
+  app = manifest["metadata"]["labels"]["app"]
+
+Safe nested get pattern:
+  labels = manifest.get("metadata", {}).get("labels", {})
+
+
+EXAMPLE — normalize API payload
+
+  def normalize_deploy(payload: dict) -> dict:
+      return {
+          "name": payload["name"],
+          "image": payload.get("image", "nginx:latest"),
+          "replicas": int(payload.get("replicas", 1)),
+      }
+
+
+INTERVIEW
+Q: What can be a dict key?
+A: Hashable types: str, int, tuple of hashables — not list/dict/set.
+
+Q: dict.get vs []?
+A: [] raises KeyError if missing; get returns None/default.
+
+Q: Why dicts for JSON APIs?
+A: JSON object ↔ Python dict is the natural mapping FastAPI/Pydantic use.
+
+
+================================================================================
+07. SETS
+================================================================================
+
+Unordered unique elements. Fast membership tests.
+
+  roles = {"admin", "viewer", "operator"}
+  roles.add("auditor")
+  "admin" in roles               # O(1) average
+
+Operations:
+  a | b        # union
+  a & b        # intersection
+  a - b        # difference
+
+CloudOps use:
+  required = {"deploy:write", "pods:read"}
+  granted = {"pods:read", "logs:read"}
+  missing = required - granted   # {"deploy:write"}
+
+
+INTERVIEW
+Q: When set over list?
+A: Uniqueness + fast `in` checks (permissions, tags, namespaces).
+
+
+================================================================================
+08. OPERATORS & COMPARISONS
+================================================================================
+
+Arithmetic: + - * / // % **
+  /  true division (float)
+  // floor division
+  %  remainder
+  ** power
+
+Comparison: == != < <= > >=
+Chained: 1 < x < 10
+
+Logical: and or not
+  if user and user.get("active"):
+      ...
+
+Identity: is / is not
+Membership: in / not in
+
+Walrus := (assignment expression, 3.8+):
+  if (n := len(services)) > 3:
+      print(n)
+
+
+INTERVIEW
+Q: / vs //?
+A: / always float division in Python 3; // floors toward -inf for ints.
+
+
+================================================================================
+09. CONTROL FLOW
+================================================================================
+
+IF / ELIF / ELSE
+----------------
+  if status == 200:
+      ...
+  elif status in (401, 403):
+      ...
+  else:
+      ...
+
+FOR
+---
+  for svc in services:
+      print(svc)
+
+  for i, svc in enumerate(services, start=1):
+      print(i, svc)
+
+  for key, value in user.items():
+      ...
+
+WHILE
+-----
+  retries = 3
+  while retries > 0:
+      ok = try_connect()
+      if ok:
+          break
+      retries -= 1
+  else:
+      # while-else: runs if loop did NOT break
+      raise RuntimeError("db unreachable")
+
+MATCH / CASE (3.10+) — great for status/commands
+------------------------------------------------
+  match status:
+      case 200 | 201:
+          ...
+      case 401 | 403:
+          ...
+      case 404:
+          ...
+      case _:
+          ...
+
+  match event:
+      case {"type": "deploy", "name": name}:
+          ...
+      case {"type": "scale", "replicas": int(r)} if r > 0:
+          ...
+      case _:
+          ...
+
+break / continue / pass
+  break     — leave loop
+  continue  — next iteration
+  pass      — empty placeholder
+
+
+EXAMPLE — RBAC gate
+
+  def assert_can_deploy(role: str) -> None:
+      if role not in {"admin", "operator"}:
+          raise PermissionError("deploy not allowed")
+
+
+INTERVIEW
+Q: for-else / while-else?
+A: else runs if loop finished without break — useful for "not found" patterns.
+
+
+================================================================================
+10. FUNCTIONS (DEEP) — WI-009 / WI-224
+================================================================================
+
+Definition:
+  def health() -> dict[str, str]:
+      return {"status": "ok"}
+
+Parameters:
+  def deploy(name: str, image: str, replicas: int = 1) -> dict:
+      return {"name": name, "image": image, "replicas": replicas}
+
+Positional vs keyword calls:
+  deploy("web", "nginx:1.27")
+  deploy(name="web", image="nginx:1.27", replicas=2)
+
+*args — extra positionals as tuple:
+  def log_lines(*lines: str) -> None:
+      for line in lines:
+          print(line)
+
+**kwargs — extra keywords as dict:
+  def build_headers(**kwargs: str) -> dict[str, str]:
+      return kwargs
+
+Keyword-only (after *):
+  def create_user(email: str, *, role: str = "viewer") -> None:
+      ...
+
+Positional-only (before /) — advanced, know it exists:
+  def f(a, b, /, c):
+      ...
+
+Return multiple values = return a tuple:
+  return access_token, refresh_token
+
+Docstrings:
+  def hash_password(password: str) -> str:
+      """Return a secure password hash for storage."""
+      ...
+
+Mutable default pitfall (CLASSIC INTERVIEW):
+  # BAD
+  def add_item(item, bucket=[]):
+      bucket.append(item)
+      return bucket
+
+  # GOOD
+  def add_item(item, bucket=None):
+      if bucket is None:
+          bucket = []
+      bucket.append(item)
+      return bucket
+
+Early return style (clean APIs):
+  def get_role(user: dict | None) -> str:
+      if user is None:
+          return "anonymous"
+      return user.get("role", "viewer")
+
+Functions are first-class:
+  def apply(fn, value):
+      return fn(value)
+  apply(str.upper, "ok")
+
+
+CloudOps mapping:
+  FastAPI endpoint = normal Python function
+  Depends(...) injects arguments
+  return dict/Pydantic → JSON response
+
+
+INTERVIEW
+Q: *args vs **kwargs?
+A: *args tuple of extra positional; **kwargs dict of extra keyword args.
+
+Q: Why avoid mutable defaults?
+A: Default object is created once; later calls share/mutate the same list/dict.
+
+Q: What does returning nothing return?
+A: None.
+
+
+================================================================================
+11. SCOPE — LEGB
+================================================================================
+
+Python looks up names in order:
+  L — Local
+  E — Enclosing (nested functions)
+  G — Global (module)
+  B — Builtins (len, str, ...)
+
+  x = "global"
+
+  def outer():
+      x = "enclosing"
+      def inner():
+          print(x)     # enclosing
+      inner()
+
+global / nonlocal (use rarely):
+  Prefer passing values and returning results over mutating globals.
+  Config should come from env/settings objects, not scattered globals.
+
+
+INTERVIEW
+Q: What is LEGB?
+A: Name resolution order: Local, Enclosing, Global, Builtins.
+
+
+================================================================================
+12. COMPREHENSIONS & GENERATOR EXPRESSIONS — WI-223
+================================================================================
+
+List comprehension:
+  names = [s.upper() for s in services]
+  active = [p for p in pods if p["ready"]]
+
+Dict comprehension:
+  role_map = {u["email"]: u["role"] for u in users}
+
+Set comprehension:
+  namespaces = {p["ns"] for p in pods}
+
+Generator expression (lazy):
+  total = sum(x * x for x in range(10))
+
+When NOT to use comprehensions:
+  Complex multi-step logic — use a normal for-loop for readability.
+
+
+INTERVIEW
+Q: List comp vs generator expr?
+A: [...] builds full list in memory; (...) yields lazily — better for large data.
+
+
+================================================================================
+13. TYPE HINTS — PROJECT CRITICAL
+================================================================================
+
+Hints document intent; FastAPI/Pydantic use them for validation & OpenAPI.
+
+  def get_user(user_id: int) -> dict[str, str] | None:
+      ...
+
+Common forms (3.10+):
+  str | None
+  list[str]
+  dict[str, int]
+  tuple[str, int]
+  set[str]
+
+Older typing module (still seen):
+  from typing import Optional, List, Dict, Any, Callable, Iterable
+  Optional[str] == str | None
+
+Any — escape hatch (avoid when possible)
+Callable[[int, str], bool]
+Iterable[str]
+
+Type aliases:
+  JSONDict = dict[str, object]
+  Headers = dict[str, str]
+
+TypedDict (structured dict):
+  from typing import TypedDict
+  class DeployPayload(TypedDict):
+      name: str
+      image: str
+      replicas: int
+
+
+EXAMPLE — CloudOps flavored
+
+  from enum import Enum
+
+  class Role(str, Enum):
+      ADMIN = "admin"
+      VIEWER = "viewer"
+      OPERATOR = "operator"
+
+  def can_delete_cluster(role: Role) -> bool:
+      return role is Role.ADMIN
+
+
+INTERVIEW
+Q: Do type hints enforce types at runtime?
+A: Not by themselves. Pydantic/FastAPI enforce at API boundaries; mypy/pyright
+   check statically.
+
+Q: Why hints in FastAPI?
+A: Request parsing, validation errors (422), and auto OpenAPI docs.
+
+
+================================================================================
+14. MODULES & PACKAGES — WI-009
+================================================================================
+
+MODULE = one .py file
+PACKAGE = folder of modules (usually with __init__.py)
+
+Example layout for practice:
+
+  practice/
+    utils/
+      __init__.py
+      hello.py
+    main.py
+
+utils/hello.py:
+  def say_hello(name: str) -> str:
+      return f"Hello, {name}"
+
+main.py:
+  from utils.hello import say_hello
+  print(say_hello("CloudOps"))
+
+Import styles:
+  import json
+  import utils.hello as hello
+  from utils.hello import say_hello
+  from utils.hello import *          # avoid in app code
+
+__name__:
+  if __name__ == "__main__":
+      # runs only when executed directly
+      ...
+
+__init__.py:
+  - marks package
+  - can be empty
+  - can re-export: from .hello import say_hello
+
+Target CloudOps service layout:
+
+  auth-service/
+    app/
+      __init__.py
+      main.py
+      core/
+        config.py
+      db/
+        session.py
+      models/
+        user.py
+      schemas/
+        auth.py
+      api/
+        routes/
+          auth.py
+      services/
+        auth_service.py
+    tests/
+    requirements.txt
+
+
+INTERVIEW
+Q: Module vs package?
+A: Module = file; package = directory of modules.
+
+Q: Why __init__.py?
+A: Declares a package / package API surface.
+
+Q: Absolute vs relative import?
+A: Absolute `from app.models import User` preferred in apps; relative `from .models`
+   inside a package.
+
+
+================================================================================
+15. FILES, PATHLIB, JSON, ENV
+================================================================================
+
+PATHLIB
+-------
+  from pathlib import Path
+  root = Path(__file__).resolve().parent
+  data = root / "data" / "config.json"
+  text = data.read_text(encoding="utf-8")
+  data.write_text("{}", encoding="utf-8")
+
+JSON
+----
+  import json
+  obj = json.loads('{"a": 1}')      # str -> python
+  s = json.dumps(obj, indent=2)     # python -> str
+
+  with Path("x.json").open() as f:
+      obj = json.load(f)
+
+ENV
+---
+  import os
+  database_url = os.getenv("DATABASE_URL")
+  if not database_url:
+      raise RuntimeError("DATABASE_URL is required")
+
+Never hardcode passwords in source for CloudOps.
+
+
+INTERVIEW
+Q: json.loads vs json.load?
+A: loads parses a string; load reads from a file object.
+
+
+================================================================================
+16. EXCEPTIONS — WI-226
+================================================================================
+
+  try:
+      user = find_user(email)
+  except UserNotFoundError as exc:
+      ...
+  except Exception:
+      logger.exception("unexpected")
+      raise
+  finally:
+      db.close()
+
+Raise:
+  raise ValueError("replicas must be >= 1")
+
+Custom hierarchy (recommended for APIs):
+
+  class DomainError(Exception):
+      def __init__(self, message: str, code: str = "domain_error"):
+          self.message = message
+          self.code = code
+          super().__init__(message)
+
+  class NotFoundError(DomainError):
+      def __init__(self, message: str = "Not found"):
+          super().__init__(message, "not_found")
+
+  class AuthError(DomainError):
+      def __init__(self, message: str = "Unauthorized"):
+          super().__init__(message, "unauthorized")
+
+  class ForbiddenError(DomainError):
+      def __init__(self, message: str = "Forbidden"):
+          super().__init__(message, "forbidden")
+
+Map later in FastAPI:
+  NotFoundError → 404
+  AuthError → 401
+  ForbiddenError → 403
+  Validation → 422
+  unknown → 500
+
+Rules:
+  - Catch what you can handle/translate
+  - Don't swallow exceptions silently
+  - Don't use bare `except:`
+
+
+INTERVIEW
+Q: try/except/finally roles?
+A: except handles; finally cleans up always.
+
+Q: Why custom exceptions?
+A: Stable domain errors → consistent HTTP responses.
+
+
+================================================================================
+17. CLASSES & OOP — WI-225 foundation
+================================================================================
+
+  class User:
+      def __init__(self, email: str, role: str) -> None:
+          self.email = email
+          self.role = role
+
+      def is_admin(self) -> bool:
+          return self.role == "admin"
+
+      def __repr__(self) -> str:
+          return f"User(email={self.email!r}, role={self.role!r})"
+
+  u = User("a@b.com", "admin")
+
+Class attributes vs instance attributes:
+  class Config:
+      DEFAULT_REPLICAS = 1          # shared class attr
+      def __init__(self, name: str):
+          self.name = name          # per-instance
+
+Inheritance:
+  class AppError(Exception):
+      ...
+  class NotFoundError(AppError):
+      ...
+
+Composition over inheritance for services:
+  class AuthService:
+      def __init__(self, repo, hasher):
+          self._repo = repo
+          self._hasher = hasher
+
+      def login(self, email: str, password: str) -> str:
+          user = self._repo.get_by_email(email)
+          ...
+
+@classmethod / @staticmethod (know the difference):
+  @classmethod — receives class; alt constructors
+  @staticmethod — no self/cls; namespaced function
+
+@property — computed attribute style
+
+
+INTERVIEW
+Q: Class vs object?
+A: Class = blueprint; object = instance.
+
+Q: Inheritance vs composition?
+A: is-a vs has-a. Prefer composition for business services.
+
+Q: What is self?
+A: The instance the method is bound to.
+
+
+================================================================================
+18. DATACLASSES & ENUMS — WI-225
+================================================================================
+
+DATACLASS
+---------
+  from dataclasses import dataclass, field
+
+  @dataclass
+  class DeploymentRequest:
+      name: str
+      image: str
+      replicas: int = 1
+      labels: dict[str, str] = field(default_factory=dict)
+
+  req = DeploymentRequest("web", "nginx:1.27")
+
+ENUM
+----
+  from enum import Enum
+
+  class Role(str, Enum):
+      ADMIN = "admin"
+      VIEWER = "viewer"
+      OPERATOR = "operator"
+
+  class DeployStatus(str, Enum):
+      PENDING = "pending"
+      RUNNING = "running"
+      FAILED = "failed"
+      SUCCEEDED = "succeeded"
+
+  Role("admin")                 # Role.ADMIN
+  Role.ADMIN.value              # "admin"
+
+Why str Enum?
+  Works cleanly with JSON and Pydantic.
+
+
+INTERVIEW
+Q: Dataclass vs Pydantic BaseModel?
+A: Dataclass = simple in-process data. Pydantic = validation/coercion/JSON schema
+   at API boundaries. CloudOps APIs use Pydantic at the edge.
+
+
+================================================================================
+19. DECORATORS
+================================================================================
+
+A decorator wraps a function to add behavior.
+
+  import functools
+  import time
+
+  def timed(fn):
+      @functools.wraps(fn)
+      def wrapper(*args, **kwargs):
+          start = time.perf_counter()
+          try:
+              return fn(*args, **kwargs)
+          finally:
+              elapsed = time.perf_counter() - start
+              print(f"{fn.__name__} took {elapsed:.4f}s")
+      return wrapper
+
+  @timed
+  def work():
+      ...
+
+Stacking:
+  @decorator_a
+  @decorator_b
+  def f():
+      ...
+  # equivalent to f = decorator_a(decorator_b(f))
+
+CloudOps:
+  @app.get("/health")          # FastAPI registers route
+  @router.post("/login")
+  Depends is related DI pattern
+
+
+INTERVIEW
+Q: What is a decorator?
+A: A callable that takes a function and returns a new callable, used with @syntax.
+
+Q: Why functools.wraps?
+A: Preserves original function name/doc for debugging and OpenAPI-ish metadata.
+
+
+================================================================================
+20. CONTEXT MANAGERS
+================================================================================
+
+  with open("file.txt", encoding="utf-8") as f:
+      data = f.read()
+  # auto-closed
+
+Custom via class:
+  class DBSession:
+      def __enter__(self):
+          self.db = SessionLocal()
+          return self.db
+      def __exit__(self, exc_type, exc, tb):
+          self.db.close()
+
+Via contextlib:
+  from contextlib import contextmanager
+
+  @contextmanager
+  def get_db():
+      db = SessionLocal()
+      try:
+          yield db
+      finally:
+          db.close()
+
+
+INTERVIEW
+Q: Why `with`?
+A: Guarantees setup/teardown even if exceptions occur.
+
+
+================================================================================
+21. ITERATORS & GENERATORS (yield)
+================================================================================
+
+Iterable = can be looped (list, dict keys, files...)
+Iterator = object with __next__ producing values
+
+Generator function:
+  def countdown(n: int):
+      while n > 0:
+          yield n
+          n -= 1
+
+  for x in countdown(3):
+      print(x)
+
+FastAPI dependency pattern:
+  def get_db():
+      db = SessionLocal()
+      try:
+          yield db          # pause here while endpoint runs
+      finally:
+          db.close()
+
+
+INTERVIEW
+Q: What does yield do?
+A: Returns a value and pauses function state; makes a generator.
+
+Q: Why yield in get_db?
+A: Setup before request, teardown after — like a context manager for DI.
+
+
+================================================================================
+22. VIRTUALENV & PIP — WI-007 / WI-227
+================================================================================
+
+  python -m venv .venv
+  .venv\Scripts\activate          # Windows
+  python -m pip install --upgrade pip
+  pip install fastapi uvicorn
+  pip freeze > requirements.txt
+  pip install -r requirements.txt
+
+Deactivate:
+  deactivate
+
+Rules:
+  - one venv per project/service
+  - never commit .venv/
+  - commit requirements.txt (or lockfile)
+  - recreate from freeze on new machine
+
+
+INTERVIEW
+Q: Why venv?
+A: Isolate dependencies so auth-service packages don't conflict with other projects.
+
+
+================================================================================
+23. LOGGING & DEBUGGING MINDSET
+================================================================================
+
+  import logging
+  logger = logging.getLogger(__name__)
+
+  logger.info("user login email=%s", email)
+  logger.exception("failed to create user")   # includes traceback
+
+Prefer logging over print in services.
+Include request ids later for observability.
+
+
+================================================================================
+24. ASYNC BASICS — WI-228
+================================================================================
+
+  import asyncio
+  import httpx
+
+  async def fetch(url: str) -> int:
+      async with httpx.AsyncClient() as client:
+          r = await client.get(url)
+          return r.status_code
+
+  async def main():
+      code = await fetch("https://httpbin.org/get")
+      print(code)
+
+  asyncio.run(main())
+
+Mental model:
+  await parks this coroutine until I/O completes; event loop runs other work.
+
+Rules of thumb:
+  - async helps concurrent I/O (HTTP, DB drivers)
+  - does not magically speed CPU-bound crypto/parsing
+  - don't call blocking time.sleep / heavy sync I/O inside async without care
+
+
+INTERVIEW
+Q: async def vs def?
+A: Coroutine function vs normal function. FastAPI supports both; async shines for I/O.
+
+
+================================================================================
+25. STDLIB CHEAT SHEET FOR CLOUDOPS
+================================================================================
+
+  os, os.getenv              env/config
+  sys                        argv, exit, path
+  json                       API payloads
+  datetime / timezone        tokens expiry, audit timestamps
+  pathlib.Path               files
+  uuid                       ids, request ids
+  secrets                    API keys, secure tokens
+  hashlib                    (prefer passlib/bcrypt for passwords)
+  logging                    service logs
+  re                         careful validation
+  collections.Counter/defaultdict
+  itertools                  advanced iteration
+  functools.wraps/lru_cache
+  copy / deepcopy
+  typing / enum / dataclasses
+  asyncio / httpx (lib)      async HTTP
+
+
+================================================================================
+26. IDIOMS & PITFALLS (interview traps)
+================================================================================
+
+1) Mutable default args — NEVER
+2) `is` for None only (not for ints/strings intern tricks)
+3) Shallow vs deep copy on nested manifests
+4) Catching Exception too broadly
+5) Modifying list while iterating — iterate copy or build new list
+6) Using bare except
+7) Shadowing builtins: don't name variables list, dict, id, type carelessly
+8) Comparing floats with == for critical equality
+9) Assuming dict order — modern Python preserves insertion order, but design
+   APIs without relying on order unless specified
+10) Encoding: always UTF-8 for files/APIs
+
+
+================================================================================
+27. HOW PYTHON MAPS TO CLOUDOPS AI PLATFORM
+================================================================================
+
+Concept                 In this project
+----------------------  --------------------------------------------
+function                FastAPI endpoint / service method
+dict / Pydantic model   JSON request & response
+class                   SQLAlchemy User, domain objects
+Enum                    Role, DeployStatus
+package/module          app/api, app/models, app/services
+raise DomainError       HTTP 4xx via exception handlers
+yield in get_db         DB session lifecycle per request
+venv + requirements     reproducible service installs
+async/await             high-concurrency I/O endpoints / httpx calls
+logging                 observability later with Loki
+uuid/secrets            request ids, API keys
+os.getenv               DATABASE_URL, JWT secrets
+
+Spine to memorize:
+
+  JSON → Python objects → validate → business logic → DB/side effects → Python → JSON
+
+
+================================================================================
+28. MEGA INTERVIEW BANK (PYTHON BASICS)
+================================================================================
+Answer out loud. Prefer CloudOps examples when possible.
+
+
+--- A. Beginner ---
+
+Q1. What is Python?
+A. High-level interpreted language; our backend services are written in it.
+
+Q2. What is a variable?
+A. A name bound to an object in memory.
+
+Q3. Basic types?
+A. int, float, bool, str, list, tuple, dict, set, NoneType.
+
+Q4. How to check type?
+A. type(x) or isinstance(x, int).
+
+Q5. What is None?
+A. Singleton meaning no value.
+
+Q6. Mutable vs immutable?
+A. Mutable can change in place (list/dict/set). Immutable cannot (int/str/tuple).
+
+Q7. Why are strings immutable?
+A. Safety/hashability; "changes" create new objects.
+
+Q8. What is an f-string?
+A. Formatted string literal: f"hello {name}".
+
+Q9. list vs tuple?
+A. List mutable ordered; tuple immutable ordered.
+
+Q10. list vs set?
+A. Set unique unordered; fast membership.
+
+Q11. What is a dict?
+A. Key-value mapping; JSON object analogue.
+
+Q12. How do you safely read a missing dict key?
+A. dict.get(key, default).
+
+Q13. What does `in` do for dicts?
+A. Tests key membership, not values.
+
+Q14. Truthiness of [] and ""?
+A. Both falsy.
+
+Q15. == vs is?
+A. Value vs identity. Use `is None`.
+
+Q16. What is slicing?
+A. subsequence = s[start:stop:step]
+
+Q17. How to reverse a list/string?
+A. obj[::-1] or reversed(...)
+
+Q18. append vs extend?
+A. append one item; extend from iterable.
+
+Q19. How to iterate with index?
+A. enumerate(seq)
+
+Q20. What is unpacking?
+A. a, b = (1, 2); also *rest patterns.
+
+
+--- B. Control flow & functions ---
+
+Q21. if vs elif?
+A. elif is exclusive branch after failed previous conditions.
+
+Q22. break vs continue?
+A. break exits loop; continue skips to next iteration.
+
+Q23. What is match/case?
+A. Structural pattern matching (3.10+).
+
+Q24. Define a function with typed params and return.
+A. def add(a: int, b: int) -> int: return a + b
+
+Q25. Default arguments?
+A. Values used when caller omits that param.
+
+Q26. Mutable default bug?
+A. Shared list/dict across calls — use None sentinel.
+
+Q27. *args?
+A. Extra positional args as tuple.
+
+Q28. **kwargs?
+A. Extra keyword args as dict.
+
+Q29. Keyword-only args?
+A. Parameters after * must be passed by name.
+
+Q30. Can functions return multiple values?
+A. Yes, via tuple unpacking.
+
+Q31. First-class functions?
+A. Functions are objects; pass/return/store them.
+
+Q32. lambda?
+A. Anonymous single-expression function; prefer named defs in services.
+
+Q33. What is a docstring?
+A. String literal right after def describing behavior.
+
+Q34. pass statement?
+A. No-op placeholder.
+
+Q35. Early return benefits?
+A. Flatter code; handle guard cases first.
+
+
+--- C. Scope / modules / packages ---
+
+Q36. LEGB?
+A. Local, Enclosing, Global, Builtins lookup order.
+
+Q37. Module?
+A. A .py file importable as a namespace.
+
+Q38. Package?
+A. Directory of modules (typically with __init__.py).
+
+Q39. Why split code across modules?
+A. Maintainability, testing, clear boundaries (routes vs models vs services).
+
+Q40. import vs from import?
+A. import module vs bring names into current namespace.
+
+Q41. What is __name__ == "__main__"?
+A. True when file executed as script entrypoint.
+
+Q42. Circular imports — what/why bad?
+A: Two modules import each other at top level → partial init errors.
+   Fix by restructuring or local imports.
+
+Q43. Absolute vs relative import?
+A. app.models vs .models — prefer absolute in applications.
+
+Q44. What does __init__.py do?
+A. Marks package; may export public API.
+
+Q45. sys.path role?
+A. Locations Python searches for imports.
+
+
+--- D. Collections deep ---
+
+Q46. Shallow vs deep copy?
+A. Shallow copies top container; nested objects shared. deepcopy recurses.
+
+Q47. Why can't list be a dict key?
+A. Lists are unhashable/mutable.
+
+Q48. dict insertion order?
+A. Preserved since 3.7 language guarantee — still don't abuse as a list.
+
+Q49. defaultdict use case?
+A. Auto-create values for missing keys (grouping).
+
+Q50. Counter use case?
+A. Count hashable items (log level counts, status tallies).
+
+Q51. zip?
+A. Pair iterables elementwise.
+
+Q52. any / all?
+A. any(true if any true); all(true if all true).
+
+Q53. sorted key=?
+A. sorted(users, key=lambda u: u["email"])
+
+Q54. Comprehension vs for-loop?
+A. Comp for simple map/filter; loop for complex logic.
+
+Q55. Generator expression memory benefit?
+A. Lazy — doesn't build full list.
+
+
+--- E. OOP ---
+
+Q56. Class vs instance?
+A. Blueprint vs concrete object.
+
+Q57. __init__ purpose?
+A. Initialize instance attributes.
+
+Q58. self meaning?
+A. Current instance.
+
+Q59. Inheritance?
+A. Child class reuses/extends parent.
+
+Q60. Composition?
+A. Object stores other objects as collaborators (AuthService has repo).
+
+Q61. Method vs function?
+A. Method is function bound to an object/class.
+
+Q62. @classmethod vs @staticmethod?
+A. classmethod gets cls; staticmethod is namespaced plain function.
+
+Q63. @property?
+A. Attribute-like access to computed/managed value.
+
+Q64. __repr__ vs __str__?
+A. repr unambiguous/debug; str human-friendly.
+
+Q65. Duck typing?
+A. Behavior matters more than nominal type ("if it quacks...").
+
+Q66. Encapsulation in Python?
+A. Convention with _private; not strict access control.
+
+Q67. Dataclass benefits?
+A. Auto boilerplate for data containers.
+
+Q68. Enum benefits?
+A. Closed set of values; avoids magic strings for Role/Status.
+
+Q69. Pydantic vs SQLAlchemy vs dataclass — when each?
+A. API validation; ORM/DB; simple internal data.
+
+Q70. What is an interface-like pattern in Python?
+A. Protocol/ABC — structural or explicit abstract base classes.
+
+
+--- F. Exceptions / resources ---
+
+Q71. Exception vs error handling strategy?
+A. Use exceptions for exceptional/domain failures; map to HTTP at edge.
+
+Q72. raise from?
+A. Chain exceptions to preserve cause.
+
+Q73. finally vs context manager?
+A. both cleanup; context managers are cleaner/reusable.
+
+Q74. Why not bare except?
+A. Catches too much (incl. SystemExit); hides bugs.
+
+Q75. How design NotFoundError?
+A. Subclass DomainError with code; handler returns 404 JSON.
+
+
+--- G. Decorators / generators / async ---
+
+Q76. Decorator conceptually?
+A. Wrapper that adds cross-cutting behavior.
+
+Q77. Decorator factory?
+A. Decorator that takes arguments: returns actual decorator.
+
+Q78. yield vs return?
+A. yield pauses generator; return ends with value (StopIteration).
+
+Q79. Iterator protocol?
+A. __iter__ / __next__.
+
+Q80. async def creates what?
+A. A coroutine function; calling it returns a coroutine object.
+
+Q81. await meaning?
+A. Yield control until awaitable completes.
+
+Q82. Event loop?
+A. Runs coroutines cooperatively scheduling I/O waits.
+
+Q83. When async does NOT help?
+A. CPU-bound work under GIL without processes/native extensions.
+
+Q84. Can you call async fn without await?
+A. You get a coroutine object warning if never awaited — bug.
+
+
+--- H. Tooling ---
+
+Q85. venv purpose?
+A. Isolated dependency environment.
+
+Q86. pip freeze?
+A. List installed distributions==versions.
+
+Q87. requirements.txt purpose?
+A. Reproducible installs across machines/CI.
+
+Q88. Why not commit venv?
+A. Huge, OS-specific, regenerable from requirements.
+
+Q89. ModuleNotFoundError common causes?
+A. Wrong venv, package not installed, wrong working directory/package layout.
+
+Q90. What is a wheel?
+A. Built package format pip installs.
+
+
+--- I. CloudOps-applied Python ---
+
+Q91. How represent JWT claims in Python?
+A. dict[str, Any] or Pydantic model after decode.
+
+Q92. How represent RBAC roles?
+A. str Enum + set of permissions.
+
+Q93. How parse PORT from env?
+A. int(os.getenv("PORT", "8000"))
+
+Q94. Why custom DomainError hierarchy?
+A. Map cleanly to 401/403/404 without ad-hoc returns.
+
+Q95. Why separate modules models vs schemas?
+A. DB shape ≠ API shape (never return password hash).
+
+Q96. How implement get_db lifecycle?
+A. yield session in dependency; close in finally.
+
+Q97. How would you deep-merge label dicts?
+A. Carefully with copy/comprehensions; know shallow pitfalls.
+
+Q98. Why logging not print in auth-service?
+A. Levels, handlers, correlation, production ops.
+
+Q99. How generate API keys?
+A. secrets.token_urlsafe(...)
+
+Q100. How generate request ids?
+A. str(uuid.uuid4())
+
+Q101. Validate replicas >= 1 where?
+A. In typed function / Pydantic field constraints at API boundary.
+
+Q102. Convert list[User] to JSON-able list[dict]?
+A. Manually or via Pydantic .model_dump() / schema.
+
+Q103. Why hash passwords with dedicated lib?
+A. Use bcrypt/argon2 via passlib; don't invent crypto with hashlib alone.
+
+Q104. Store config how?
+A. pydantic-settings / os.getenv — not hardcoded secrets.
+
+Q105. Worker job payload type?
+A. dict/Pydantic model with job_id, type, data.
+
+
+--- J. Tricky / senior-leaning ---
+
+Q106. GIL impact?
+A. One bytecode thread at a time in CPython; I/O still concurrent; CPU needs multiprocess.
+
+Q107. is vs == for small ints/strings?
+A. Interning can make `is` accidentally True — never rely on it.
+
+Q108. Late binding closure in loop?
+A. Closures capture names not values — classic bug with lambdas in loop.
+
+Q109. __slots__?
+A. Memory optimization restricting attributes.
+
+Q110. Monkey patching?
+A. Replace objects at runtime; OK in tests, risky in prod.
+
+Q111. What is a context variable / contextvars?
+A. Per-task state for async (request id) without passing everywhere.
+
+Q112. dataclasses(frozen=True)?
+A. Immutable instances — safer value objects.
+
+Q113. Structural typing with Protocol?
+A. Type-check against behavior without inheritance.
+
+Q114. cache / lru_cache caveats?
+A. Args must be hashable; beware memory growth & stale data.
+
+Q115. EAFP vs LBYL?
+A. Easier to Ask Forgiveness than Permission (try/except) vs Look Before You Leap.
+   Python often prefers EAFP.
+
+Q116. Why explicit Exception subclasses over error codes only?
+A. Better stack traces, typed handlers, clearer control flow.
+
+Q117. How would you unit-test a pure RBAC function?
+A. Table-driven asserts over (role, action) → allowed bool.
+
+Q118. Side effects make testing hard — what do?
+A: Inject dependencies (repo, clock, hasher) instead of globals.
+
+Q119. What is idempotency in Python terms for a function?
+A. Same effect when repeated — important for retryable workers.
+
+Q120. Difference between equality and hashing consistency?
+A: Equal objects must have equal hashes if used in sets/dicts.
+
+
+--- K. Rapid definitions ---
+
+Q121. Bytecode? — Intermediate form CPython runs.
+Q122. REPL? — Interactive Python shell.
+Q123. Pip? — Package installer.
+Q124. PyPI? — Package index.
+Q125. Wheel? — Built distribute format.
+Q126. Annotation? — Type hint attached to param/return.
+Q127. Coroutine? — Async function result awaiting scheduling.
+Q128. Iterable? — Can produce iterator.
+Q129. Hashable? — Has stable hash; usable as dict key.
+Q130. Namespace? — Mapping of names to objects.
+Q131. Side effect? — Change outside return value (IO/DB).
+Q132. Pure function? — No side effects; deterministic.
+Q133. Guard clause? — Early return for invalid input.
+Q134. boilderplate? — Repetitive code dataclasses remove.
+Q135. Sentinel? — Special marker value (often None or object()).
+Q136. Serialization? — Object → JSON string.
+Q137. Deserialization? — JSON string → object.
+Q138. Validation? — Check data meets rules.
+Q139. Coercion? — Convert types (str "1" → int 1).
+Q140. Entrypoint? — main module/process start.
+
+
+--- L. Debug scenarios ---
+
+Q141. KeyError in payload handler — cause?
+A. Assumed key present; use get/validate with Pydantic.
+
+Q142. TypeError: unhashable type: 'list'?
+A. Used list as dict key or put in set.
+
+Q143. AttributeError: NoneType has no attribute x?
+A. Got None; missing null check.
+
+Q144. UnboundLocalError?
+A. Assigned to name later in function so Python treats as local everywhere.
+
+Q145. JSONDecodeError?
+A. Invalid JSON string/body.
+
+Q146. IndentationError?
+A. Mix tabs/spaces or wrong block level.
+
+Q147. Module imported but function missing?
+A. Circular import or wrong module path/name shadowing.
+
+Q148. List mutated unexpectedly across requests?
+A. Mutable global/default shared state — classic bug.
+
+Q149. Float weirdness 0.1+0.2?
+A. Binary floating point; don't compare money floats naively.
+
+Q150. Why did my comprehension feel slow?
+A: Huge list materialization — use generator / DB-side filter.
+
+
+================================================================================
+29. PRACTICE DRILLS (DO THESE)
+================================================================================
+
+Create folder: MainProject/practice/python_basics/
+
+DRILL 1 — types
+  Print type of: "a", 1, 1.0, True, None, [], {}, set(), ()
+
+DRILL 2 — strings
+  Parse "Bearer <token>" into scheme and token with partition/split.
+
+DRILL 3 — lists/dicts
+  Given list of user dicts, build email→role map; filter admins.
+
+DRILL 4 — functions
+  Write 10 typed functions: add, clamp, merge_headers, can_deploy(role), etc.
+
+DRILL 5 — module import
+  utils/hello.py + main.py import (WI-009 DoD)
+
+DRILL 6 — dataclass + enum
+  DeploymentRequest + DeployStatus + Role
+
+DRILL 7 — exceptions
+  DomainError hierarchy; function that raises NotFoundError
+
+DRILL 8 — comprehensions
+  20 one-liners on lists/dicts
+
+DRILL 9 — venv
+  Create, install, freeze, delete, recreate (WI-227)
+
+DRILL 10 — async
+  httpx async GET httpbin status code (WI-228)
+
+DRILL 11 — mini RBAC
+  permissions set math: required - granted
+
+DRILL 12 — JSON roundtrip
+  dict → dumps → loads → assert equal
+
+
+================================================================================
+30. DONE CRITERIA — YOU ARE READY WHEN...
+================================================================================
+
+You can, without notes:
+  [ ] Explain names vs objects, == vs is, mutable vs immutable
+  [ ] Use list/dict/set/tuple confidently with examples
+  [ ] Write typed functions with defaults, *args, **kwargs safely
+  [ ] Create a package, import a module, explain __init__.py
+  [ ] Write a class, dataclass, and Enum for Role/Status
+  [ ] Raise/catch custom DomainError and say how it maps to HTTP
+  [ ] Explain decorators, with/context managers, yield in get_db
+  [ ] Create venv + requirements workflow
+  [ ] Explain async/await at a high level
+  [ ] Answer at least 80 interview Qs in section 28 out loud
+  [ ] Draw how Python objects flow in auth-service
+
+Then go to:
+  docs/Learnings/PythonHTTP/notes.txt  (HTTP + API glue)
+  then FastAPI / SQL / auth work items
+
+
+ONE-LINE SPINE
+--------------
+Python names bind to objects; functions transform them; packages organize them;
+exceptions signal domain failures; FastAPI just exposes that over HTTP JSON.
+
+
+END OF PYTHON BASICS NOTES
+================================================================================
