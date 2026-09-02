@@ -943,3 +943,6 @@ Do this on a throwaway folder, not a real job repo:
 8. Practice `git revert` vs `git reset` until the difference is obvious
 
 If you want a **part 2**, I can walk through `rebase`, `reflog`, `cherry-pick`, `bisect`, `hooks`, and a real **team Git workflow** (GitHub Flow vs Git Flow) using this CloudOps repo as the example. Say which of those you want next, or paste a `git status` / error and I’ll map it onto this model.
+
+
+git switch -c feature-login
